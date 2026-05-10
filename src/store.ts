@@ -34,6 +34,7 @@ export type DocumentType =
   | "Lease"
   | "Loan Agreement"
   | "Receipt"
+  | "Check Image"
   | "Payment Proof"
   | "Tax Document"
   | "Other"

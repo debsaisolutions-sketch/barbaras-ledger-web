@@ -6,6 +6,8 @@ import {
   getRunningBalanceTable,
   getNotes,
   getDocuments,
+  addDocumentWithFile,
+  getLedgerDisplayName,
   updateProperty,
   archiveProperty,
   markPropertyReminderDone,
@@ -15,6 +17,7 @@ import {
   type PropertyTransaction,
   type Note,
   type Document as Doc,
+  type DocumentType,
 } from "../store";
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
 import { useRefresh } from "../App";
@@ -42,6 +45,15 @@ export default function PropertyDetail() {
   const [deletingProperty, setDeletingProperty] = useState(false);
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [savingReminder, setSavingReminder] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [savingUpload, setSavingUpload] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadForm, setUploadForm] = useState({
+    name: "",
+    type: "Other" as DocumentType,
+    notes: "",
+  });
+  const [ledgerTitle, setLedgerTitle] = useState("EasyLedger");
   const [reminderForm, setReminderForm] = useState({
     reminderDate: "",
     reminderNote: "",
@@ -84,6 +96,21 @@ export default function PropertyDetail() {
       cancelled = true;
     };
   }, [id, key]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const custom = await getLedgerDisplayName();
+        if (!cancelled && custom) setLedgerTitle(custom);
+      } catch {
+        /* keep default */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleMarkClosed = async () => {
     if (!property) return;
@@ -197,6 +224,38 @@ export default function PropertyDetail() {
       alert("Reminder marked done.");
     } catch (err) {
       alert((err as Error).message || "Could not update reminder.");
+    }
+  };
+
+  const saveDocument = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!property) return;
+    if (!uploadForm.name.trim()) {
+      alert("Please enter a document name.");
+      return;
+    }
+    if (!uploadFile) {
+      alert("Please choose a file to upload.");
+      return;
+    }
+    try {
+      setSavingUpload(true);
+      await addDocumentWithFile(uploadFile, {
+        documentName: uploadForm.name.trim(),
+        documentType: uploadForm.type,
+        relatedType: "property",
+        relatedId: property.id,
+        notes: uploadForm.notes.trim(),
+      });
+      setShowUploadModal(false);
+      setUploadFile(null);
+      setUploadForm({ name: "", type: "Other", notes: "" });
+      refresh();
+      alert("Document saved.");
+    } catch (err) {
+      alert((err as Error).message || "Could not save document.");
+    } finally {
+      setSavingUpload(false);
     }
   };
 
@@ -335,8 +394,14 @@ export default function PropertyDetail() {
         <button className="btn btn-secondary btn-lg" onClick={openReminderModal}>
           ⏰ Add Reminder
         </button>
+        <button className="btn btn-secondary btn-lg" onClick={() => setShowUploadModal(true)}>
+          📄 Upload Document
+        </button>
         <button className="btn btn-outline btn-lg" onClick={() => navigate(`/properties/${id}/edit`)}>
           ✏️ Edit
+        </button>
+        <button className="btn btn-outline btn-lg" onClick={() => window.print()}>
+          🖨️ Print Property Summary
         </button>
         {property.status !== "Sold" && property.status !== "Closed" && (
           <button type="button" className="btn btn-primary btn-lg" onClick={() => setShowSoldModal(true)}>
@@ -389,6 +454,51 @@ export default function PropertyDetail() {
           </div>
         </div>
       )}
+
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h3 style={{ marginBottom: 10 }}>Property Documents</h3>
+        {docs.length === 0 ? (
+          <p style={{ color: "var(--muted)" }}>No documents linked to this property yet.</p>
+        ) : (
+          docs.map((d) => (
+            <div key={d.id} className="list-item" style={{ cursor: "default", marginBottom: 8 }}>
+              <div className="item-content">
+                <div className="item-title">{d.documentName}</div>
+                <div className="item-subtitle">
+                  {d.documentType} · Uploaded {fmtDate(d.uploadedAt.split("T")[0])}
+                </div>
+              </div>
+              {d.storagePath ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={async () => {
+                      const ok = await openDocumentInNewTab(d.storagePath!);
+                      if (!ok) alert("Could not open this file. Try again.");
+                    }}
+                  >
+                    View
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={async () => {
+                      const ok = await downloadDocumentFile(
+                        d.storagePath!,
+                        d.originalFileName || d.documentName
+                      );
+                      if (!ok) alert("Could not download. Try again.");
+                    }}
+                  >
+                    Download
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
+      </div>
 
       {showDeleteModal && (
         <div
@@ -547,6 +657,120 @@ export default function PropertyDetail() {
           </div>
         </div>
       )}
+
+      {showUploadModal && (
+        <div className="modal-overlay" onClick={() => !savingUpload && setShowUploadModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Upload Document</h3>
+            <form onSubmit={(e) => void saveDocument(e)}>
+              <div className="form-group">
+                <label>Document Name *</label>
+                <input
+                  value={uploadForm.name}
+                  onChange={(e) => setUploadForm((f) => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div className="form-group">
+                <label>Document Type</label>
+                <select
+                  value={uploadForm.type}
+                  onChange={(e) => setUploadForm((f) => ({ ...f, type: e.target.value as DocumentType }))}
+                >
+                  <option>Rental Agreement</option>
+                  <option>Lease</option>
+                  <option>Receipt</option>
+                  <option>Check Image</option>
+                  <option>Payment Proof</option>
+                  <option>Tax Document</option>
+                  <option>Other</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Notes</label>
+                <textarea
+                  value={uploadForm.notes}
+                  onChange={(e) => setUploadForm((f) => ({ ...f, notes: e.target.value }))}
+                  style={{ minHeight: 90 }}
+                />
+              </div>
+              <div className="form-group">
+                <label>File upload *</label>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.heic,.heif,.webp,image/*,application/pdf"
+                  onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+                />
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-outline btn-lg"
+                  onClick={() => setShowUploadModal(false)}
+                  disabled={savingUpload}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary btn-lg" disabled={savingUpload}>
+                  {savingUpload ? "Saving…" : "Save Document"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h3>Property Summary (Print)</h3>
+        <p style={{ color: "var(--muted)", marginBottom: 8 }}>{ledgerTitle}</p>
+        <p style={{ color: "var(--muted)", marginBottom: 14 }}>Printed: {fmtDate(new Date().toISOString())}</p>
+        <div className="detail-info-grid">
+          <div className="detail-info-item"><label>Property</label><p>{property.propertyName}</p></div>
+          <div className="detail-info-item"><label>Address</label><p>{property.address || "—"}</p></div>
+          <div className="detail-info-item"><label>Tenant</label><p>{property.tenantName || "—"}</p></div>
+          <div className="detail-info-item"><label>Contact</label><p>{property.tenantContact || property.tenantPhone || "—"}</p></div>
+          <div className="detail-info-item"><label>Rent</label><p>{fmtCurrency(property.monthlyRent)}</p></div>
+          <div className="detail-info-item"><label>Due day</label><p>{property.rentDueDay || "—"}</p></div>
+          <div className="detail-info-item"><label>Status</label><p>{property.status}</p></div>
+          <div className="detail-info-item"><label>Current balance</label><p>{fmtCurrency(Math.max(0, balance))}</p></div>
+        </div>
+        {property.status === "Sold" && (
+          <div style={{ marginTop: 10, fontSize: 15, lineHeight: 1.7 }}>
+            <strong>Sold:</strong> {property.soldDate ? fmtDate(property.soldDate) : "—"} ·{" "}
+            <strong>Price:</strong> {property.salePrice != null ? fmtCurrency(property.salePrice) : "—"} ·{" "}
+            <strong>Buyer:</strong> {property.buyerName || "—"}
+            <div><strong>Sale notes:</strong> {property.saleNotes || "—"}</div>
+          </div>
+        )}
+        <h4 style={{ marginTop: 16, marginBottom: 8 }}>Payment / Charge History</h4>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Description</th><th>Charges</th><th>Payments</th><th>Balance</th></tr></thead>
+            <tbody>
+              {txns.map((t) => (
+                <tr key={`print-${t.id}`}>
+                  <td>{fmtDate(t.date)}</td>
+                  <td>{t.description}</td>
+                  <td>{t.chargeAmount > 0 ? fmtCurrency(t.chargeAmount) : ""}</td>
+                  <td>{t.paymentAmount > 0 ? fmtCurrency(t.paymentAmount) : ""}</td>
+                  <td>{fmtCurrency(Math.max(0, t.runningBalance))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <h4 style={{ marginTop: 16, marginBottom: 8 }}>Notes</h4>
+        {notes.length === 0 ? <p style={{ color: "var(--muted)" }}>No notes.</p> : notes.map((n) => (
+          <p key={`print-note-${n.id}`} style={{ marginBottom: 6 }}>
+            {fmtDate(n.noteDate)} — {n.noteText}
+          </p>
+        ))}
+        <h4 style={{ marginTop: 16, marginBottom: 8 }}>Documents</h4>
+        {docs.length === 0 ? <p style={{ color: "var(--muted)" }}>No documents.</p> : docs.map((d) => (
+          <p key={`print-doc-${d.id}`} style={{ marginBottom: 6 }}>
+            {d.documentName} ({d.documentType}) — {fmtDate(d.uploadedAt.split("T")[0])}
+          </p>
+        ))}
+      </div>
 
       <div className="detail-tabs">
         <button

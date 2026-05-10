@@ -6,6 +6,9 @@ import {
   getLoanRunningBalanceTable,
   getNotes,
   getDocuments,
+  addDocumentWithFile,
+  getLedgerDisplayName,
+  type DocumentType,
   updateLoan,
   archiveLoan,
   markLoanReminderDone,
@@ -30,6 +33,15 @@ export default function LoanDetail() {
   const [loading, setLoading] = useState(true);
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [savingReminder, setSavingReminder] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [savingUpload, setSavingUpload] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadForm, setUploadForm] = useState({
+    name: "",
+    type: "Other" as DocumentType,
+    notes: "",
+  });
+  const [ledgerTitle, setLedgerTitle] = useState("EasyLedger");
   const [reminderForm, setReminderForm] = useState({
     reminderDate: "",
     reminderNote: "",
@@ -67,6 +79,21 @@ export default function LoanDetail() {
       cancelled = true;
     };
   }, [id, key]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const custom = await getLedgerDisplayName();
+        if (!cancelled && custom) setLedgerTitle(custom);
+      } catch {
+        /* keep default */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleArchive = async () => {
     if (!loan) return;
@@ -129,6 +156,38 @@ export default function LoanDetail() {
       alert("Reminder marked done.");
     } catch (err) {
       alert((err as Error).message || "Could not update reminder.");
+    }
+  };
+
+  const saveDocument = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loan) return;
+    if (!uploadForm.name.trim()) {
+      alert("Please enter a document name.");
+      return;
+    }
+    if (!uploadFile) {
+      alert("Please choose a file to upload.");
+      return;
+    }
+    try {
+      setSavingUpload(true);
+      await addDocumentWithFile(uploadFile, {
+        documentName: uploadForm.name.trim(),
+        documentType: uploadForm.type,
+        relatedType: "loan",
+        relatedId: loan.id,
+        notes: uploadForm.notes.trim(),
+      });
+      setShowUploadModal(false);
+      setUploadFile(null);
+      setUploadForm({ name: "", type: "Other", notes: "" });
+      refresh();
+      alert("Document saved.");
+    } catch (err) {
+      alert((err as Error).message || "Could not save document.");
+    } finally {
+      setSavingUpload(false);
     }
   };
 
@@ -229,8 +288,14 @@ export default function LoanDetail() {
         <button className="btn btn-secondary" onClick={openReminderModal}>
           ⏰ Add Reminder
         </button>
+        <button className="btn btn-secondary" onClick={() => setShowUploadModal(true)}>
+          📄 Upload Document
+        </button>
         <button className="btn btn-outline" onClick={() => navigate(`/loans/${id}/edit`)}>
           ✏️ Edit
+        </button>
+        <button className="btn btn-outline" onClick={() => window.print()}>
+          🖨️ Print Loan Summary
         </button>
         {loan.status !== "Written Off" && loan.status !== "Paid Off" && (
           <button className="btn btn-danger btn-sm" onClick={handleArchive}>
@@ -268,6 +333,51 @@ export default function LoanDetail() {
           </div>
         </div>
       )}
+
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h3 style={{ marginBottom: 10 }}>Loan Documents</h3>
+        {docs.length === 0 ? (
+          <p style={{ color: "var(--muted)" }}>No documents linked to this loan yet.</p>
+        ) : (
+          docs.map((d) => (
+            <div key={d.id} className="list-item" style={{ cursor: "default", marginBottom: 8 }}>
+              <div className="item-content">
+                <div className="item-title">{d.documentName}</div>
+                <div className="item-subtitle">
+                  {d.documentType} · Uploaded {fmtDate(d.uploadedAt.split("T")[0])}
+                </div>
+              </div>
+              {d.storagePath ? (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={async () => {
+                      const ok = await openDocumentInNewTab(d.storagePath!);
+                      if (!ok) alert("Could not open this file.");
+                    }}
+                  >
+                    View
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={async () => {
+                      const ok = await downloadDocumentFile(
+                        d.storagePath!,
+                        d.originalFileName || d.documentName
+                      );
+                      if (!ok) alert("Could not download.");
+                    }}
+                  >
+                    Download
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
+      </div>
 
       <div className="detail-tabs">
         <button
@@ -430,6 +540,109 @@ export default function LoanDetail() {
           </div>
         </div>
       )}
+
+      {showUploadModal && (
+        <div className="modal-overlay" onClick={() => !savingUpload && setShowUploadModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Upload Document</h3>
+            <form onSubmit={(e) => void saveDocument(e)}>
+              <div className="form-group">
+                <label>Document Name *</label>
+                <input
+                  value={uploadForm.name}
+                  onChange={(e) => setUploadForm((f) => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div className="form-group">
+                <label>Document Type</label>
+                <select
+                  value={uploadForm.type}
+                  onChange={(e) => setUploadForm((f) => ({ ...f, type: e.target.value as DocumentType }))}
+                >
+                  <option>Loan Agreement</option>
+                  <option>Receipt</option>
+                  <option>Check Image</option>
+                  <option>Payment Proof</option>
+                  <option>Tax Document</option>
+                  <option>Other</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Notes</label>
+                <textarea
+                  value={uploadForm.notes}
+                  onChange={(e) => setUploadForm((f) => ({ ...f, notes: e.target.value }))}
+                  style={{ minHeight: 90 }}
+                />
+              </div>
+              <div className="form-group">
+                <label>File upload *</label>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.heic,.heif,.webp,image/*,application/pdf"
+                  onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+                />
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-outline btn-lg"
+                  onClick={() => setShowUploadModal(false)}
+                  disabled={savingUpload}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary btn-lg" disabled={savingUpload}>
+                  {savingUpload ? "Saving…" : "Save Document"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h3>Loan Summary (Print)</h3>
+        <p style={{ color: "var(--muted)", marginBottom: 8 }}>{ledgerTitle}</p>
+        <p style={{ color: "var(--muted)", marginBottom: 14 }}>Printed: {fmtDate(new Date().toISOString())}</p>
+        <div className="detail-info-grid">
+          <div className="detail-info-item"><label>Borrower</label><p>{loan.borrowerName}</p></div>
+          <div className="detail-info-item"><label>Phone</label><p>{loan.borrowerPhone || "—"}</p></div>
+          <div className="detail-info-item"><label>Email</label><p>{loan.borrowerEmail || "—"}</p></div>
+          <div className="detail-info-item"><label>Original amount</label><p>{fmtCurrency(loan.originalAmount)}</p></div>
+          <div className="detail-info-item"><label>Status</label><p>{loan.status}</p></div>
+          <div className="detail-info-item"><label>Current balance</label><p>{fmtCurrency(Math.max(0, balance))}</p></div>
+        </div>
+        <h4 style={{ marginTop: 16, marginBottom: 8 }}>Payment / Charge History</h4>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Description</th><th>Charges</th><th>Payments</th><th>Balance</th></tr></thead>
+            <tbody>
+              {txns.map((t) => (
+                <tr key={`print-loan-${t.id}`}>
+                  <td>{fmtDate(t.date)}</td>
+                  <td>{t.description}</td>
+                  <td>{t.chargeAmount > 0 ? fmtCurrency(t.chargeAmount) : ""}</td>
+                  <td>{t.paymentAmount > 0 ? fmtCurrency(t.paymentAmount) : ""}</td>
+                  <td>{fmtCurrency(Math.max(0, t.runningBalance))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <h4 style={{ marginTop: 16, marginBottom: 8 }}>Notes</h4>
+        {notes.length === 0 ? <p style={{ color: "var(--muted)" }}>No notes.</p> : notes.map((n) => (
+          <p key={`print-loan-note-${n.id}`} style={{ marginBottom: 6 }}>
+            {fmtDate(n.noteDate)} — {n.noteText}
+          </p>
+        ))}
+        <h4 style={{ marginTop: 16, marginBottom: 8 }}>Documents</h4>
+        {docs.length === 0 ? <p style={{ color: "var(--muted)" }}>No documents.</p> : docs.map((d) => (
+          <p key={`print-loan-doc-${d.id}`} style={{ marginBottom: 6 }}>
+            {d.documentName} ({d.documentType}) — {fmtDate(d.uploadedAt.split("T")[0])}
+          </p>
+        ))}
+      </div>
     </div>
   );
 }
