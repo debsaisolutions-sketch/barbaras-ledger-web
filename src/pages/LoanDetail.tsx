@@ -6,7 +6,9 @@ import {
   getLoanRunningBalanceTable,
   getNotes,
   getDocuments,
+  updateLoan,
   archiveLoan,
+  markLoanReminderDone,
   type Loan,
   type LoanTransaction,
   type Note,
@@ -26,6 +28,12 @@ export default function LoanDetail() {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [tab, setTab] = useState<"balance" | "notes" | "docs">("balance");
   const [loading, setLoading] = useState(true);
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const [savingReminder, setSavingReminder] = useState(false);
+  const [reminderForm, setReminderForm] = useState({
+    reminderDate: "",
+    reminderNote: "",
+  });
   const balance = txns.length > 0 ? txns[txns.length - 1].runningBalance : 0;
 
   useEffect(() => {
@@ -70,6 +78,57 @@ export default function LoanDetail() {
       } catch (e) {
         alert((e as Error).message);
       }
+    }
+  };
+
+  const openReminderModal = () => {
+    if (!loan) return;
+    setReminderForm({
+      reminderDate: loan.nextReminderDate || "",
+      reminderNote: loan.reminderNote || "",
+    });
+    setShowReminderModal(true);
+  };
+
+  const saveReminder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loan) return;
+    const reminderDate = reminderForm.reminderDate.trim();
+    const reminderNote = reminderForm.reminderNote.trim();
+    if (!reminderDate) {
+      if (reminderNote) {
+        alert("Please choose a reminder date so this can appear on your Dashboard.");
+      } else {
+        alert("Please choose a reminder date.");
+      }
+      return;
+    }
+    try {
+      setSavingReminder(true);
+      await updateLoan(loan.id, {
+        nextReminderDate: reminderDate,
+        reminderNote,
+        reminderCompleted: false,
+        reminderCompletedAt: "",
+      });
+      setShowReminderModal(false);
+      refresh();
+      alert("Reminder saved.");
+    } catch (err) {
+      alert((err as Error).message || "Could not save reminder.");
+    } finally {
+      setSavingReminder(false);
+    }
+  };
+
+  const markReminderDone = async () => {
+    if (!loan) return;
+    try {
+      await markLoanReminderDone(loan.id);
+      refresh();
+      alert("Reminder marked done.");
+    } catch (err) {
+      alert((err as Error).message || "Could not update reminder.");
     }
   };
 
@@ -167,6 +226,9 @@ export default function LoanDetail() {
         <button className="btn btn-secondary" onClick={() => navigate(`/loans/${id}/note`)}>
           📝 Add Note
         </button>
+        <button className="btn btn-secondary" onClick={openReminderModal}>
+          ⏰ Add Reminder
+        </button>
         <button className="btn btn-outline" onClick={() => navigate(`/loans/${id}/edit`)}>
           ✏️ Edit
         </button>
@@ -176,6 +238,36 @@ export default function LoanDetail() {
           </button>
         )}
       </div>
+
+      {(loan.nextReminderDate || loan.reminderNote || loan.reminderCompleted) && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <h3 style={{ marginBottom: 10 }}>Current Reminder</h3>
+          <div className="detail-info-grid">
+            <div className="detail-info-item">
+              <label>Reminder date</label>
+              <p>{loan.nextReminderDate ? fmtDate(loan.nextReminderDate) : "—"}</p>
+            </div>
+            <div className="detail-info-item">
+              <label>Reminder note</label>
+              <p style={{ whiteSpace: "pre-wrap" }}>{loan.reminderNote || "—"}</p>
+            </div>
+            <div className="detail-info-item">
+              <label>Status</label>
+              <p>{loan.reminderCompleted ? "Done" : "Open"}</p>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <button className="btn btn-outline btn-sm" onClick={openReminderModal}>
+              Edit Reminder
+            </button>
+            {!loan.reminderCompleted && loan.nextReminderDate && (
+              <button className="btn btn-primary btn-sm" onClick={() => void markReminderDone()}>
+                Mark Done
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="detail-tabs">
         <button
@@ -295,6 +387,49 @@ export default function LoanDetail() {
             </div>
           ))
         ))}
+
+      {showReminderModal && (
+        <div className="modal-overlay" onClick={() => !savingReminder && setShowReminderModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Add Reminder</h3>
+            <p style={{ color: "var(--muted)", marginBottom: 14, lineHeight: 1.5 }}>
+              Use reminders for things you need to check or follow up on, like checking your bank
+              account for a direct deposit.
+            </p>
+            <form onSubmit={(e) => void saveReminder(e)}>
+              <div className="form-group">
+                <label>Reminder Date *</label>
+                <input
+                  type="date"
+                  value={reminderForm.reminderDate}
+                  onChange={(e) => setReminderForm((f) => ({ ...f, reminderDate: e.target.value }))}
+                />
+              </div>
+              <div className="form-group">
+                <label>Reminder Note</label>
+                <textarea
+                  value={reminderForm.reminderNote}
+                  onChange={(e) => setReminderForm((f) => ({ ...f, reminderNote: e.target.value }))}
+                  style={{ minHeight: 90 }}
+                />
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-outline btn-lg"
+                  onClick={() => setShowReminderModal(false)}
+                  disabled={savingReminder}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary btn-lg" disabled={savingReminder}>
+                  {savingReminder ? "Saving…" : "Save Reminder"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

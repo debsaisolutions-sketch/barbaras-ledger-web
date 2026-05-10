@@ -6,7 +6,9 @@ import {
   getRunningBalanceTable,
   getNotes,
   getDocuments,
+  updateProperty,
   archiveProperty,
+  markPropertyReminderDone,
   markPropertySold,
   deleteProperty,
   type Property,
@@ -38,6 +40,12 @@ export default function PropertyDetail() {
   const [savingSold, setSavingSold] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingProperty, setDeletingProperty] = useState(false);
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const [savingReminder, setSavingReminder] = useState(false);
+  const [reminderForm, setReminderForm] = useState({
+    reminderDate: "",
+    reminderNote: "",
+  });
   const balance = txns.length > 0 ? txns[txns.length - 1].runningBalance : 0;
 
   const canRecordPayments =
@@ -138,6 +146,57 @@ export default function PropertyDetail() {
       alert((e as Error).message);
     } finally {
       setDeletingProperty(false);
+    }
+  };
+
+  const openReminderModal = () => {
+    if (!property) return;
+    setReminderForm({
+      reminderDate: property.nextReminderDate || "",
+      reminderNote: property.reminderNote || "",
+    });
+    setShowReminderModal(true);
+  };
+
+  const saveReminder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!property) return;
+    const reminderDate = reminderForm.reminderDate.trim();
+    const reminderNote = reminderForm.reminderNote.trim();
+    if (!reminderDate) {
+      if (reminderNote) {
+        alert("Please choose a reminder date so this can appear on your Dashboard.");
+      } else {
+        alert("Please choose a reminder date.");
+      }
+      return;
+    }
+    try {
+      setSavingReminder(true);
+      await updateProperty(property.id, {
+        nextReminderDate: reminderDate,
+        reminderNote,
+        reminderCompleted: false,
+        reminderCompletedAt: "",
+      });
+      setShowReminderModal(false);
+      refresh();
+      alert("Reminder saved.");
+    } catch (err) {
+      alert((err as Error).message || "Could not save reminder.");
+    } finally {
+      setSavingReminder(false);
+    }
+  };
+
+  const markReminderDone = async () => {
+    if (!property) return;
+    try {
+      await markPropertyReminderDone(property.id);
+      refresh();
+      alert("Reminder marked done.");
+    } catch (err) {
+      alert((err as Error).message || "Could not update reminder.");
     }
   };
 
@@ -273,6 +332,9 @@ export default function PropertyDetail() {
         <button className="btn btn-secondary btn-lg" onClick={() => navigate(`/properties/${id}/note`)}>
           📝 Add Note
         </button>
+        <button className="btn btn-secondary btn-lg" onClick={openReminderModal}>
+          ⏰ Add Reminder
+        </button>
         <button className="btn btn-outline btn-lg" onClick={() => navigate(`/properties/${id}/edit`)}>
           ✏️ Edit
         </button>
@@ -297,6 +359,36 @@ export default function PropertyDetail() {
           </button>
         </div>
       </div>
+
+      {(property.nextReminderDate || property.reminderNote || property.reminderCompleted) && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <h3 style={{ marginBottom: 10 }}>Current Reminder</h3>
+          <div className="detail-info-grid">
+            <div className="detail-info-item">
+              <label>Reminder date</label>
+              <p>{property.nextReminderDate ? fmtDate(property.nextReminderDate) : "—"}</p>
+            </div>
+            <div className="detail-info-item">
+              <label>Reminder note</label>
+              <p style={{ whiteSpace: "pre-wrap" }}>{property.reminderNote || "—"}</p>
+            </div>
+            <div className="detail-info-item">
+              <label>Status</label>
+              <p>{property.reminderCompleted ? "Done" : "Open"}</p>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <button className="btn btn-outline btn-sm" onClick={openReminderModal}>
+              Edit Reminder
+            </button>
+            {!property.reminderCompleted && property.nextReminderDate && (
+              <button className="btn btn-primary btn-sm" onClick={() => void markReminderDone()}>
+                Mark Done
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {showDeleteModal && (
         <div
@@ -406,6 +498,49 @@ export default function PropertyDetail() {
                 </button>
                 <button type="submit" className="btn btn-primary btn-lg" disabled={savingSold}>
                   {savingSold ? "Saving…" : "Save — Mark as Sold"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showReminderModal && (
+        <div className="modal-overlay" onClick={() => !savingReminder && setShowReminderModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Add Reminder</h3>
+            <p style={{ color: "var(--muted)", marginBottom: 14, lineHeight: 1.5 }}>
+              Use reminders for things you need to check or follow up on, like checking your bank
+              account for a direct deposit.
+            </p>
+            <form onSubmit={(e) => void saveReminder(e)}>
+              <div className="form-group">
+                <label>Reminder Date *</label>
+                <input
+                  type="date"
+                  value={reminderForm.reminderDate}
+                  onChange={(e) => setReminderForm((f) => ({ ...f, reminderDate: e.target.value }))}
+                />
+              </div>
+              <div className="form-group">
+                <label>Reminder Note</label>
+                <textarea
+                  value={reminderForm.reminderNote}
+                  onChange={(e) => setReminderForm((f) => ({ ...f, reminderNote: e.target.value }))}
+                  style={{ minHeight: 90 }}
+                />
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-outline btn-lg"
+                  onClick={() => setShowReminderModal(false)}
+                  disabled={savingReminder}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary btn-lg" disabled={savingReminder}>
+                  {savingReminder ? "Saving…" : "Save Reminder"}
                 </button>
               </div>
             </form>
