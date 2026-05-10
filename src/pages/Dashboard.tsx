@@ -6,6 +6,8 @@ import {
   getProperties,
   getLoans,
   getUpcomingReminders,
+  markPropertyReminderDone,
+  markLoanReminderDone,
   type ActivityItem,
   type ReminderListItem,
 } from "../store";
@@ -28,6 +30,7 @@ export default function Dashboard() {
   const [loanCount, setLoanCount] = useState(0);
   const [reminders, setReminders] = useState<ReminderListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [markingReminderKey, setMarkingReminderKey] = useState<string>("");
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +78,20 @@ export default function Dashboard() {
         return "📄";
       default:
         return "📌";
+    }
+  };
+
+  const handleMarkDone = async (r: ReminderListItem) => {
+    const keyForRow = `${r.entityType}:${r.entityId}`;
+    try {
+      setMarkingReminderKey(keyForRow);
+      if (r.entityType === "property") await markPropertyReminderDone(r.entityId);
+      else await markLoanReminderDone(r.entityId);
+      setReminders((prev) => prev.filter((x) => !(x.entityType === r.entityType && x.entityId === r.entityId)));
+    } catch (e) {
+      alert((e as Error).message || "Could not mark reminder done.");
+    } finally {
+      setMarkingReminderKey("");
     }
   };
 
@@ -141,16 +158,25 @@ export default function Dashboard() {
                 ) : (
                   <div style={{ color: "var(--muted)", marginTop: 4 }}>—</div>
                 )}
-                <button
-                  type="button"
-                  className="btn btn-outline btn-sm"
-                  style={{ marginTop: 10 }}
-                  onClick={() =>
-                    navigate(r.entityType === "property" ? `/properties/${r.entityId}` : `/loans/${r.entityId}`)
-                  }
-                >
-                  Open {r.entityType === "property" ? "property" : "loan"}
-                </button>
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={() =>
+                      navigate(r.entityType === "property" ? `/properties/${r.entityId}` : `/loans/${r.entityId}`)
+                    }
+                  >
+                    Open {r.entityType === "property" ? "property" : "loan"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => void handleMarkDone(r)}
+                    disabled={markingReminderKey === `${r.entityType}:${r.entityId}`}
+                  >
+                    {markingReminderKey === `${r.entityType}:${r.entityId}` ? "Saving..." : "Mark Done"}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

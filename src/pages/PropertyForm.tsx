@@ -32,6 +32,7 @@ export default function PropertyForm() {
   });
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
+  const [initialReminder, setInitialReminder] = useState({ date: "", note: "" });
 
   useEffect(() => {
     if (!id) return;
@@ -62,6 +63,7 @@ export default function PropertyForm() {
           nextReminderDate: p.nextReminderDate,
           reminderNote: p.reminderNote,
         });
+        setInitialReminder({ date: p.nextReminderDate, note: p.reminderNote });
       } catch (e) {
         if (!cancelled) alert((e as Error).message || "Could not load property.");
       } finally {
@@ -83,6 +85,11 @@ export default function PropertyForm() {
     }
     const salePriceNum =
       form.salePrice.trim() === "" ? null : parseFloat(form.salePrice);
+    const reminderDate = form.nextReminderDate;
+    const reminderNote = form.reminderNote.trim();
+    const reminderChanged =
+      isEdit &&
+      (reminderDate !== initialReminder.date || reminderNote !== initialReminder.note.trim());
     const data = {
       propertyName: form.propertyName.trim(),
       address: form.address.trim(),
@@ -101,13 +108,20 @@ export default function PropertyForm() {
       salePrice: salePriceNum !== null && !Number.isNaN(salePriceNum) ? salePriceNum : null,
       buyerName: form.buyerName.trim(),
       saleNotes: form.saleNotes.trim(),
-      nextReminderDate: form.nextReminderDate,
-      reminderNote: form.reminderNote.trim(),
+      nextReminderDate: reminderDate,
+      reminderNote,
+      reminderCompleted: false,
+      reminderCompletedAt: "",
     };
     try {
       setSaving(true);
-      if (isEdit) await updateProperty(id!, data);
-      else await addProperty(data);
+      if (isEdit) {
+        await updateProperty(id!, {
+          ...data,
+          reminderCompleted: reminderChanged ? false : undefined,
+          reminderCompletedAt: reminderChanged ? "" : undefined,
+        });
+      } else await addProperty(data);
       refresh();
       alert(isEdit ? "Saved. Your property was updated." : "Saved. Your property was added.");
       navigate(isEdit ? `/properties/${id}` : "/properties");
@@ -290,7 +304,8 @@ export default function PropertyForm() {
             </div>
           </div>
           <p style={{ color: "var(--muted)", fontSize: 14, marginTop: -8, marginBottom: 16 }}>
-            Optional. Examples: tenant rent due, follow up on late payment, lease ending soon.
+            Use reminders for things you need to check or follow up on, like checking your bank
+            account for a direct deposit.
           </p>
           <div className="form-group">
             <label>Notes</label>

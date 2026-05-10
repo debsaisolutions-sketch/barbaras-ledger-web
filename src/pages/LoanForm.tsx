@@ -26,6 +26,7 @@ export default function LoanForm() {
   });
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
+  const [initialReminder, setInitialReminder] = useState({ date: "", note: "" });
 
   useEffect(() => {
     if (!id) return;
@@ -50,6 +51,7 @@ export default function LoanForm() {
           nextReminderDate: l.nextReminderDate,
           reminderNote: l.reminderNote,
         });
+        setInitialReminder({ date: l.nextReminderDate, note: l.reminderNote });
       } catch (e) {
         if (!cancelled) alert((e as Error).message);
       } finally {
@@ -69,6 +71,11 @@ export default function LoanForm() {
       alert("Borrower name is required.");
       return;
     }
+    const reminderDate = form.nextReminderDate;
+    const reminderNote = form.reminderNote.trim();
+    const reminderChanged =
+      isEdit &&
+      (reminderDate !== initialReminder.date || reminderNote !== initialReminder.note.trim());
     const data = {
       borrowerName: form.borrowerName.trim(),
       borrowerPhone: form.borrowerPhone.trim(),
@@ -81,13 +88,20 @@ export default function LoanForm() {
       expectedMonthlyPayment: parseFloat(form.expectedMonthlyPayment) || 0,
       status: form.status,
       notes: form.notes.trim(),
-      nextReminderDate: form.nextReminderDate,
-      reminderNote: form.reminderNote.trim(),
+      nextReminderDate: reminderDate,
+      reminderNote,
+      reminderCompleted: false,
+      reminderCompletedAt: "",
     };
     try {
       setSaving(true);
-      if (isEdit) await updateLoan(id!, data);
-      else await addLoan(data);
+      if (isEdit) {
+        await updateLoan(id!, {
+          ...data,
+          reminderCompleted: reminderChanged ? false : undefined,
+          reminderCompletedAt: reminderChanged ? "" : undefined,
+        });
+      } else await addLoan(data);
       refresh();
       alert(isEdit ? "Saved. Loan updated." : "Saved. Loan added.");
       navigate(isEdit ? `/loans/${id}` : "/loans");
@@ -207,7 +221,8 @@ export default function LoanForm() {
             </div>
           </div>
           <p style={{ color: "var(--muted)", fontSize: 14, marginTop: -8, marginBottom: 16 }}>
-            Optional. Shown on your dashboard when the date is today or later.
+            Use reminders for things you need to check or follow up on, like checking your bank
+            account for a direct deposit.
           </p>
           <div className="form-group">
             <label>Notes</label>

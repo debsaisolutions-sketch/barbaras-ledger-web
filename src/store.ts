@@ -61,6 +61,8 @@ export interface Property {
   saleNotes: string;
   nextReminderDate: string;
   reminderNote: string;
+  reminderCompleted: boolean;
+  reminderCompletedAt: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -96,6 +98,8 @@ export interface Loan {
   notes: string;
   nextReminderDate: string;
   reminderNote: string;
+  reminderCompleted: boolean;
+  reminderCompletedAt: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -245,6 +249,8 @@ function mapProperty(row: Record<string, unknown>): Property {
     saleNotes: String(row.sale_notes ?? ""),
     nextReminderDate: dateStr(row.next_reminder_date),
     reminderNote: String(row.reminder_note ?? ""),
+    reminderCompleted: Boolean(row.reminder_completed),
+    reminderCompletedAt: String(row.reminder_completed_at ?? ""),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
   };
@@ -284,6 +290,8 @@ function mapLoan(row: Record<string, unknown>): Loan {
     notes: String(row.notes ?? ""),
     nextReminderDate: dateStr(row.next_reminder_date),
     reminderNote: String(row.reminder_note ?? ""),
+    reminderCompleted: Boolean(row.reminder_completed),
+    reminderCompletedAt: String(row.reminder_completed_at ?? ""),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
   };
@@ -436,7 +444,7 @@ export async function getUpcomingReminders(): Promise<ReminderListItem[]> {
   const items: ReminderListItem[] = [];
   for (const p of properties) {
     const d = p.nextReminderDate?.trim();
-    if (d && d >= today) {
+    if (d && d >= today && !p.reminderCompleted) {
       items.push({
         date: d,
         note: p.reminderNote.trim(),
@@ -448,7 +456,7 @@ export async function getUpcomingReminders(): Promise<ReminderListItem[]> {
   }
   for (const l of loans) {
     const d = l.nextReminderDate?.trim();
-    if (d && d >= today) {
+    if (d && d >= today && !l.reminderCompleted) {
       items.push({
         date: d,
         note: l.reminderNote.trim(),
@@ -513,6 +521,8 @@ export async function addProperty(
     sale_notes: data.saleNotes ?? "",
     next_reminder_date: data.nextReminderDate || null,
     reminder_note: data.reminderNote ?? "",
+    reminder_completed: Boolean(data.reminderCompleted),
+    reminder_completed_at: data.reminderCompletedAt || null,
   };
   const { data: inserted, error } = await supabase.from(T.PROPERTIES).insert(row).select("*").single();
   if (error) throw new Error(error.message);
@@ -559,6 +569,9 @@ export async function updateProperty(id: string, data: Partial<Property>): Promi
   if (data.saleNotes !== undefined) patch.sale_notes = data.saleNotes;
   if (data.nextReminderDate !== undefined) patch.next_reminder_date = data.nextReminderDate || null;
   if (data.reminderNote !== undefined) patch.reminder_note = data.reminderNote;
+  if (data.reminderCompleted !== undefined) patch.reminder_completed = data.reminderCompleted;
+  if (data.reminderCompletedAt !== undefined)
+    patch.reminder_completed_at = data.reminderCompletedAt || null;
   const { error } = await supabase
     .from(T.PROPERTIES)
     .update(patch)
@@ -569,6 +582,13 @@ export async function updateProperty(id: string, data: Partial<Property>): Promi
 
 export async function archiveProperty(id: string): Promise<void> {
   await updateProperty(id, { status: "Closed" });
+}
+
+export async function markPropertyReminderDone(id: string): Promise<void> {
+  await updateProperty(id, {
+    reminderCompleted: true,
+    reminderCompletedAt: new Date().toISOString(),
+  });
 }
 
 export async function markPropertySold(
@@ -740,6 +760,8 @@ export async function addLoan(data: Omit<Loan, "id" | "createdAt" | "updatedAt">
     notes: data.notes,
     next_reminder_date: data.nextReminderDate || null,
     reminder_note: data.reminderNote ?? "",
+    reminder_completed: Boolean(data.reminderCompleted),
+    reminder_completed_at: data.reminderCompletedAt || null,
   };
   const { data: inserted, error } = await supabase.from(T.LOANS).insert(row).select("*").single();
   if (error) throw new Error(error.message);
@@ -780,12 +802,22 @@ export async function updateLoan(id: string, data: Partial<Loan>): Promise<void>
   if (data.notes !== undefined) patch.notes = data.notes;
   if (data.nextReminderDate !== undefined) patch.next_reminder_date = data.nextReminderDate || null;
   if (data.reminderNote !== undefined) patch.reminder_note = data.reminderNote;
+  if (data.reminderCompleted !== undefined) patch.reminder_completed = data.reminderCompleted;
+  if (data.reminderCompletedAt !== undefined)
+    patch.reminder_completed_at = data.reminderCompletedAt || null;
   const { error } = await supabase.from(T.LOANS).update(patch).eq("user_id", user.id).eq("id", id);
   if (error) throw new Error(error.message);
 }
 
 export async function archiveLoan(id: string): Promise<void> {
   await updateLoan(id, { status: "Written Off" });
+}
+
+export async function markLoanReminderDone(id: string): Promise<void> {
+  await updateLoan(id, {
+    reminderCompleted: true,
+    reminderCompletedAt: new Date().toISOString(),
+  });
 }
 
 // ============ LOAN TRANSACTIONS ============
