@@ -9,13 +9,23 @@ export default function Reports() {
   const [propReports, setPropReports] = useState<PropertyTaxReport[]>([]);
   const [loanReports, setLoanReports] = useState<LoanTaxReport[]>([]);
   const [generated, setGenerated] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const generate = () => {
-    if (reportType === "property" || reportType === "combined") setPropReports(generatePropertyTaxReport(year));
-    else setPropReports([]);
-    if (reportType === "loan" || reportType === "combined") setLoanReports(generateLoanTaxReport(year));
-    else setLoanReports([]);
-    setGenerated(true);
+  const generate = async () => {
+    try {
+      setBusy(true);
+      if (reportType === "property" || reportType === "combined")
+        setPropReports(await generatePropertyTaxReport(year));
+      else setPropReports([]);
+      if (reportType === "loan" || reportType === "combined")
+        setLoanReports(await generateLoanTaxReport(year));
+      else setLoanReports([]);
+      setGenerated(true);
+    } catch (e) {
+      alert((e as Error).message || "Could not generate reports.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const totalRentalIncome = propReports.reduce((s, r) => s + r.totalPayments, 0);
@@ -45,7 +55,9 @@ export default function Reports() {
             </select>
           </div>
         </div>
-        <button className="btn btn-primary btn-lg" onClick={generate}>Generate Report</button>
+        <button className="btn btn-primary btn-lg" onClick={() => void generate()} disabled={busy}>
+          {busy ? "Loading…" : "Generate Report"}
+        </button>
       </div>
 
       {generated && (
@@ -72,6 +84,19 @@ export default function Reports() {
                 <div key={r.property.id} className="card" style={{ marginBottom: 16 }}>
                   <h4 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{r.property.propertyName}</h4>
                   <div style={{ fontSize: 14, color: "var(--muted)", marginBottom: 12 }}>{r.property.address} · Tenant: {r.property.tenantName || "—"}</div>
+                  <div style={{ fontSize: 15, marginBottom: 12, lineHeight: 1.6 }}>
+                    <strong>Status:</strong> {r.property.status}
+                    {r.property.status === "Sold" && (
+                      <>
+                        {r.property.soldDate ? <> · <strong>Sold date:</strong> {fmtDate(r.property.soldDate)}</> : null}
+                        {r.property.salePrice != null ? <> · <strong>Sale price:</strong> {fmtCurrency(r.property.salePrice)}</> : null}
+                        {r.property.buyerName ? <> · <strong>Buyer:</strong> {r.property.buyerName}</> : null}
+                        {r.property.saleNotes ? (
+                          <div style={{ marginTop: 6 }}><strong>Sale notes:</strong> {r.property.saleNotes}</div>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
                   <div className="card-row" style={{ marginBottom: 12 }}>
                     <div><span style={{ fontSize: 13, color: "var(--muted)" }}>Rent Received</span><div style={{ fontWeight: 700, color: "var(--success)" }}>{fmtCurrency(r.totalRentReceived)}</div></div>
                     <div><span style={{ fontSize: 13, color: "var(--muted)" }}>Late Fees</span><div style={{ fontWeight: 700 }}>{fmtCurrency(r.totalLateFees)}</div></div>

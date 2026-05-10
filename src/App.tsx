@@ -1,5 +1,6 @@
 import { useState, createContext, useContext, useCallback } from "react";
-import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "./auth/AuthContext";
 import Dashboard from "./pages/Dashboard";
 import Properties from "./pages/Properties";
 import PropertyDetail from "./pages/PropertyDetail";
@@ -17,37 +18,98 @@ import AddLoanCharge from "./pages/AddLoanCharge";
 import AddNote from "./pages/AddNote";
 import TemplateView from "./pages/TemplateView";
 import CustomTemplateView from "./pages/CustomTemplateView";
+import Login from "./pages/Login";
 
-const RefreshCtx = createContext<{ key: number; refresh: () => void }>({ key: 0, refresh: () => {} });
-export function useRefresh() { return useContext(RefreshCtx); }
+const RefreshCtx = createContext<{ key: number; refresh: () => void }>({
+  key: 0,
+  refresh: () => {},
+});
+export function useRefresh() {
+  return useContext(RefreshCtx);
+}
 
-function AppContent() {
+function AppShell() {
+  const { session, loading, signOut } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const refresh = useCallback(() => setRefreshKey(k => k + 1), []);
+  const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
   const closeSidebar = () => setSidebarOpen(false);
+
+  if (loading) {
+    return (
+      <div className="empty-state" style={{ padding: 48 }}>
+        <p style={{ fontSize: 18 }}>Loading…</p>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    );
+  }
 
   return (
     <RefreshCtx.Provider value={{ key: refreshKey, refresh }}>
       <div className="app-layout">
-        <button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}>☰</button>
+        <button className="hamburger" onClick={() => setSidebarOpen(!sidebarOpen)}>
+          ☰
+        </button>
         <div className={`overlay ${sidebarOpen ? "show" : ""}`} onClick={closeSidebar} />
         <nav className={`sidebar ${sidebarOpen ? "open" : ""}`}>
           <div className="sidebar-brand">
-            <h1>Barbara's Ledger</h1>
+            <h1>Barbara&apos;s Ledger</h1>
             <p>Your Personal Record Book</p>
           </div>
           <ul className="sidebar-nav">
-            <li><NavLink to="/" end onClick={closeSidebar}><span className="nav-icon">🏠</span> Dashboard</NavLink></li>
-            <li><NavLink to="/properties" onClick={closeSidebar}><span className="nav-icon">🏢</span> Properties</NavLink></li>
-            <li><NavLink to="/loans" onClick={closeSidebar}><span className="nav-icon">🤝</span> Loans</NavLink></li>
-            <li><NavLink to="/documents" onClick={closeSidebar}><span className="nav-icon">📄</span> Documents</NavLink></li>
-            <li><NavLink to="/reports" onClick={closeSidebar}><span className="nav-icon">📊</span> Tax Reports</NavLink></li>
-            <li><NavLink to="/settings" onClick={closeSidebar}><span className="nav-icon">⚙️</span> Settings</NavLink></li>
+            <li>
+              <NavLink to="/" end onClick={closeSidebar}>
+                <span className="nav-icon">🏠</span> Dashboard
+              </NavLink>
+            </li>
+            <li>
+              <NavLink to="/properties" onClick={closeSidebar}>
+                <span className="nav-icon">🏢</span> Properties
+              </NavLink>
+            </li>
+            <li>
+              <NavLink to="/loans" onClick={closeSidebar}>
+                <span className="nav-icon">🤝</span> Loans
+              </NavLink>
+            </li>
+            <li>
+              <NavLink to="/documents" onClick={closeSidebar}>
+                <span className="nav-icon">📄</span> Documents
+              </NavLink>
+            </li>
+            <li>
+              <NavLink to="/reports" onClick={closeSidebar}>
+                <span className="nav-icon">📊</span> Tax Reports
+              </NavLink>
+            </li>
+            <li>
+              <NavLink to="/settings" onClick={closeSidebar}>
+                <span className="nav-icon">⚙️</span> Settings
+              </NavLink>
+            </li>
           </ul>
+          <div style={{ padding: "16px 20px", borderTop: "1px solid var(--border)" }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              style={{ width: "100%" }}
+              onClick={() => signOut()}
+            >
+              Sign out
+            </button>
+          </div>
         </nav>
         <main className="main-content">
           <Routes>
+            <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="/" element={<Dashboard />} />
             <Route path="/properties" element={<Properties />} />
             <Route path="/properties/new" element={<PropertyForm />} />
@@ -81,7 +143,9 @@ function AppContent() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AppContent />
+      <AuthProvider>
+        <AppShell />
+      </AuthProvider>
     </BrowserRouter>
   );
 }

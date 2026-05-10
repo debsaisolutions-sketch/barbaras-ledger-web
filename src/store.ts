@@ -1,308 +1,1154 @@
 // ============ TYPES ============
 
-export type PropertyStatus = "Active" | "Vacant" | "Past Due" | "Closed";
+import type { User } from "@supabase/supabase-js";
+import { supabase } from "./lib/supabase";
+
+export type PropertyStatus = "Active" | "Vacant" | "Past Due" | "Closed" | "Sold";
 export type LoanStatus = "Active" | "Paid Off" | "Past Due" | "Written Off";
 export type PaymentMethod = "Cash" | "Check" | "Bank Transfer" | "Other";
 export type TransactionType = "charge" | "payment" | "late_fee" | "adjustment";
 export type LoanTransactionType = "charge" | "payment" | "adjustment";
-export type DocumentType = "Rental Agreement" | "Lease" | "Loan Agreement" | "Receipt" | "Tax Document" | "Other" | "Template";
+export type DocumentType =
+  | "Rental Agreement"
+  | "Lease"
+  | "Loan Agreement"
+  | "Receipt"
+  | "Tax Document"
+  | "Other"
+  | "Template";
 export type ApplyTo = "Rent" | "Late Fee" | "Other Charge";
 
 export interface Property {
-  id: string; propertyName: string; address: string; tenantName: string;
-  tenantContact: string; tenantPhone: string; tenantEmail: string;
-  monthlyRent: number; rentDueDay: number; leaseStartDate: string;
-  leaseEndDate: string; securityDeposit: number; status: PropertyStatus;
-  notes: string; createdAt: string; updatedAt: string;
+  id: string;
+  propertyName: string;
+  address: string;
+  tenantName: string;
+  tenantContact: string;
+  tenantPhone: string;
+  tenantEmail: string;
+  monthlyRent: number;
+  rentDueDay: number;
+  leaseStartDate: string;
+  leaseEndDate: string;
+  securityDeposit: number;
+  status: PropertyStatus;
+  notes: string;
+  soldDate: string;
+  salePrice: number | null;
+  buyerName: string;
+  saleNotes: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PropertyTransaction {
-  id: string; propertyId: string; date: string; type: TransactionType;
-  description: string; chargeAmount: number; paymentAmount: number;
-  paymentMethod: PaymentMethod | ""; checkNumber: string; applyTo: ApplyTo;
-  notes: string; createdAt: string;
+  id: string;
+  propertyId: string;
+  date: string;
+  type: TransactionType;
+  description: string;
+  chargeAmount: number;
+  paymentAmount: number;
+  paymentMethod: PaymentMethod | "";
+  checkNumber: string;
+  applyTo: ApplyTo;
+  notes: string;
+  createdAt: string;
 }
 
 export interface Loan {
-  id: string; borrowerName: string; borrowerPhone: string; borrowerEmail: string;
-  relationship: string; originalAmount: number; loanDate: string;
-  interestRate: number; paymentDueDate: string; expectedMonthlyPayment: number;
-  status: LoanStatus; notes: string; createdAt: string; updatedAt: string;
+  id: string;
+  borrowerName: string;
+  borrowerPhone: string;
+  borrowerEmail: string;
+  relationship: string;
+  originalAmount: number;
+  loanDate: string;
+  interestRate: number;
+  paymentDueDate: string;
+  expectedMonthlyPayment: number;
+  status: LoanStatus;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface LoanTransaction {
-  id: string; loanId: string; date: string; type: LoanTransactionType;
-  description: string; chargeAmount: number; paymentAmount: number;
-  paymentMethod: PaymentMethod | ""; checkNumber: string; notes: string;
+  id: string;
+  loanId: string;
+  date: string;
+  type: LoanTransactionType;
+  description: string;
+  chargeAmount: number;
+  paymentAmount: number;
+  paymentMethod: PaymentMethod | "";
+  checkNumber: string;
+  notes: string;
   createdAt: string;
 }
 
 export interface Note {
-  id: string; relatedType: "property" | "loan" | "general"; relatedId: string;
-  noteDate: string; noteText: string; reminderDate: string; createdAt: string;
+  id: string;
+  relatedType: "property" | "loan" | "general";
+  relatedId: string;
+  noteDate: string;
+  noteText: string;
+  reminderDate: string;
+  createdAt: string;
 }
 
 export interface Document {
-  id: string; documentName: string; documentType: DocumentType;
-  relatedType: "property" | "loan" | "general" | "template"; relatedId: string;
-  fileUri: string; notes: string; uploadedAt: string;
+  id: string;
+  documentName: string;
+  documentType: DocumentType;
+  relatedType: "property" | "loan" | "general" | "template";
+  relatedId: string;
+  /** Template text for pasted templates; empty when file-only. */
+  fileUri: string;
+  notes: string;
+  uploadedAt: string;
+  /** Storage object path inside bucket `barbara-documents` when a file is stored. */
+  storagePath?: string | null;
+  originalFileName?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
 }
 
 export interface ActivityItem {
-  id: string; date: string; type: "payment" | "note" | "late_fee" | "document" | "charge";
-  entityType: "property" | "loan"; entityId: string; entityName: string;
-  personName: string; amount: number; description: string;
+  id: string;
+  date: string;
+  type: "payment" | "note" | "late_fee" | "document" | "charge";
+  entityType: "property" | "loan";
+  entityId: string;
+  entityName: string;
+  personName: string;
+  amount: number;
+  description: string;
 }
 
-// ============ STORAGE KEYS ============
-const KEYS = {
-  PROPERTIES: "bl_properties", PROPERTY_TRANSACTIONS: "bl_prop_txns",
-  LOANS: "bl_loans", LOAN_TRANSACTIONS: "bl_loan_txns",
-  NOTES: "bl_notes", DOCUMENTS: "bl_documents", ACTIVITIES: "bl_activities",
-};
+// ============ Barbara-only Supabase names ============
+const T = {
+  PROPERTIES: "barbara_properties",
+  PROP_TXN: "barbara_property_transactions",
+  LOANS: "barbara_loans",
+  LOAN_TXN: "barbara_loan_transactions",
+  NOTES: "barbara_notes",
+  DOCUMENTS: "barbara_documents",
+  ACTIVITIES: "barbara_activities",
+} as const;
 
-// ============ HELPERS ============
-function genId(): string { return Date.now().toString(36) + Math.random().toString(36).substr(2, 9); }
-function todayStr(): string { return new Date().toISOString().split("T")[0]; }
-function getList<T>(key: string): T[] {
-  try { const d = localStorage.getItem(key); return d ? JSON.parse(d) : []; } catch { return []; }
+export const BARBARA_DOCUMENTS_BUCKET = "barbara-documents";
+
+const ALLOWED_UPLOAD_MIME = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/heic",
+  "image/heif",
+  "image/webp",
+]);
+
+export function isAllowedDocumentMime(mime: string): boolean {
+  const m = mime.toLowerCase().split(";")[0].trim();
+  return ALLOWED_UPLOAD_MIME.has(m);
 }
-function setList<T>(key: string, list: T[]) { localStorage.setItem(key, JSON.stringify(list)); }
+
+function safeUploadFileName(name: string): string {
+  const base = name.replace(/[^a-zA-Z0-9._\- ]/g, "_").trim() || "document";
+  return base.slice(0, 180);
+}
+
+function todayStr(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+function num(v: unknown): number {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = parseFloat(String(v));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function dateStr(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v.split("T")[0];
+  return "";
+}
+
+async function requireUser(): Promise<User> {
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (error || !user) throw new Error("You must be signed in to continue.");
+  return user;
+}
+
+function mapProperty(row: Record<string, unknown>): Property {
+  const sp = row.sale_price;
+  return {
+    id: String(row.id),
+    propertyName: String(row.property_name ?? ""),
+    address: String(row.address ?? ""),
+    tenantName: String(row.tenant_name ?? ""),
+    tenantContact: String(row.tenant_contact ?? ""),
+    tenantPhone: String(row.tenant_phone ?? ""),
+    tenantEmail: String(row.tenant_email ?? ""),
+    monthlyRent: num(row.monthly_rent),
+    rentDueDay: Math.round(num(row.rent_due_day)) || 1,
+    leaseStartDate: dateStr(row.lease_start_date),
+    leaseEndDate: dateStr(row.lease_end_date),
+    securityDeposit: num(row.security_deposit),
+    status: row.status as PropertyStatus,
+    notes: String(row.notes ?? ""),
+    soldDate: dateStr(row.sold_date),
+    salePrice: sp === null || sp === undefined ? null : num(sp),
+    buyerName: String(row.buyer_name ?? ""),
+    saleNotes: String(row.sale_notes ?? ""),
+    createdAt: String(row.created_at ?? ""),
+    updatedAt: String(row.updated_at ?? ""),
+  };
+}
+
+function mapPropTxn(row: Record<string, unknown>): PropertyTransaction {
+  return {
+    id: String(row.id),
+    propertyId: String(row.property_id),
+    date: dateStr(row.txn_date),
+    type: row.type as TransactionType,
+    description: String(row.description ?? ""),
+    chargeAmount: num(row.charge_amount),
+    paymentAmount: num(row.payment_amount),
+    paymentMethod: (row.payment_method || "") as PaymentMethod | "",
+    checkNumber: String(row.check_number ?? ""),
+    applyTo: (row.apply_to || "Rent") as ApplyTo,
+    notes: String(row.notes ?? ""),
+    createdAt: String(row.created_at ?? ""),
+  };
+}
+
+function mapLoan(row: Record<string, unknown>): Loan {
+  return {
+    id: String(row.id),
+    borrowerName: String(row.borrower_name ?? ""),
+    borrowerPhone: String(row.borrower_phone ?? ""),
+    borrowerEmail: String(row.borrower_email ?? ""),
+    relationship: String(row.relationship ?? ""),
+    originalAmount: num(row.original_amount),
+    loanDate: dateStr(row.loan_date),
+    interestRate: num(row.interest_rate),
+    paymentDueDate: String(row.payment_due_date ?? ""),
+    expectedMonthlyPayment: num(row.expected_monthly_payment),
+    status: row.status as LoanStatus,
+    notes: String(row.notes ?? ""),
+    createdAt: String(row.created_at ?? ""),
+    updatedAt: String(row.updated_at ?? ""),
+  };
+}
+
+function mapLoanTxn(row: Record<string, unknown>): LoanTransaction {
+  return {
+    id: String(row.id),
+    loanId: String(row.loan_id),
+    date: dateStr(row.txn_date),
+    type: row.type as LoanTransactionType,
+    description: String(row.description ?? ""),
+    chargeAmount: num(row.charge_amount),
+    paymentAmount: num(row.payment_amount),
+    paymentMethod: (row.payment_method || "") as PaymentMethod | "",
+    checkNumber: String(row.check_number ?? ""),
+    notes: String(row.notes ?? ""),
+    createdAt: String(row.created_at ?? ""),
+  };
+}
+
+function mapNote(row: Record<string, unknown>): Note {
+  return {
+    id: String(row.id),
+    relatedType: row.related_type as Note["relatedType"],
+    relatedId: String(row.related_id ?? ""),
+    noteDate: dateStr(row.note_date),
+    noteText: String(row.note_text ?? ""),
+    reminderDate: row.reminder_date ? dateStr(row.reminder_date) : "",
+    createdAt: String(row.created_at ?? ""),
+  };
+}
+
+function mapDocument(row: Record<string, unknown>): Document {
+  const templateBody = row.template_body != null ? String(row.template_body) : "";
+  const storagePath = row.storage_path != null ? String(row.storage_path) : null;
+  return {
+    id: String(row.id),
+    documentName: String(row.document_name ?? ""),
+    documentType: row.document_type as DocumentType,
+    relatedType: row.related_type as Document["relatedType"],
+    relatedId: String(row.related_id ?? ""),
+    fileUri: templateBody,
+    notes: String(row.notes ?? ""),
+    uploadedAt: String(row.uploaded_at ?? ""),
+    storagePath,
+    originalFileName: row.file_name != null ? String(row.file_name) : null,
+    mimeType: row.mime_type != null ? String(row.mime_type) : null,
+    sizeBytes: row.size_bytes != null ? Number(row.size_bytes) : null,
+  };
+}
+
+function mapActivity(row: Record<string, unknown>): ActivityItem {
+  return {
+    id: String(row.id),
+    date: dateStr(row.activity_date),
+    type: row.type as ActivityItem["type"],
+    entityType: row.entity_type as ActivityItem["entityType"],
+    entityId: String(row.entity_id ?? ""),
+    entityName: String(row.entity_name ?? ""),
+    personName: String(row.person_name ?? ""),
+    amount: num(row.amount),
+    description: String(row.description ?? ""),
+  };
+}
+
+async function trimActivities(userId: string): Promise<void> {
+  const { count, error: cErr } = await supabase
+    .from(T.ACTIVITIES)
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId);
+  if (cErr || count === null || count <= 200) return;
+  const excess = count - 200;
+  const { data: oldest, error: oErr } = await supabase
+    .from(T.ACTIVITIES)
+    .select("id")
+    .eq("user_id", userId)
+    .order("activity_date", { ascending: true })
+    .order("id", { ascending: true })
+    .limit(excess);
+  if (oErr || !oldest?.length) return;
+  await supabase
+    .from(T.ACTIVITIES)
+    .delete()
+    .in(
+      "id",
+      oldest.map((r) => r.id as string)
+    );
+}
+
+async function addActivity(
+  userId: string,
+  data: Omit<ActivityItem, "id">
+): Promise<void> {
+  const { error } = await supabase.from(T.ACTIVITIES).insert({
+    user_id: userId,
+    activity_date: data.date,
+    type: data.type,
+    entity_type: data.entityType,
+    entity_id: data.entityId,
+    entity_name: data.entityName,
+    person_name: data.personName,
+    amount: data.amount,
+    description: data.description,
+  });
+  if (error) throw new Error(error.message);
+  await trimActivities(userId);
+}
 
 // ============ PROPERTIES ============
-export function getProperties(): Property[] { return getList<Property>(KEYS.PROPERTIES); }
-export function getProperty(id: string): Property | undefined { return getProperties().find(p => p.id === id); }
 
-export function addProperty(data: Omit<Property, "id" | "createdAt" | "updatedAt">): Property {
-  const list = getProperties();
-  const now = new Date().toISOString();
-  const p: Property = { ...data, id: genId(), createdAt: now, updatedAt: now };
-  list.push(p); setList(KEYS.PROPERTIES, list);
+export async function getProperties(): Promise<Property[]> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.PROPERTIES)
+    .select("*")
+    .eq("user_id", user.id)
+    .order("property_name");
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => mapProperty(r as Record<string, unknown>));
+}
+
+export async function getProperty(id: string): Promise<Property | undefined> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.PROPERTIES)
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return undefined;
+  return mapProperty(data as Record<string, unknown>);
+}
+
+export async function addProperty(
+  data: Omit<Property, "id" | "createdAt" | "updatedAt">
+): Promise<Property> {
+  const user = await requireUser();
+  const row = {
+    user_id: user.id,
+    property_name: data.propertyName,
+    address: data.address,
+    tenant_name: data.tenantName,
+    tenant_contact: data.tenantContact,
+    tenant_phone: data.tenantPhone,
+    tenant_email: data.tenantEmail,
+    monthly_rent: data.monthlyRent,
+    rent_due_day: data.rentDueDay,
+    lease_start_date: data.leaseStartDate || null,
+    lease_end_date: data.leaseEndDate || null,
+    security_deposit: data.securityDeposit,
+    status: data.status,
+    notes: data.notes,
+    sold_date: data.soldDate || null,
+    sale_price: data.salePrice,
+    buyer_name: data.buyerName ?? "",
+    sale_notes: data.saleNotes ?? "",
+  };
+  const { data: inserted, error } = await supabase.from(T.PROPERTIES).insert(row).select("*").single();
+  if (error) throw new Error(error.message);
+  const p = mapProperty(inserted as Record<string, unknown>);
   if (data.monthlyRent > 0) {
-    addPropertyTransaction({ propertyId: p.id, date: todayStr(), type: "charge",
-      description: "Initial monthly rent charge", chargeAmount: data.monthlyRent,
-      paymentAmount: 0, paymentMethod: "", checkNumber: "", applyTo: "Rent", notes: "" });
+    await addPropertyTransaction({
+      propertyId: p.id,
+      date: todayStr(),
+      type: "charge",
+      description: "Initial monthly rent charge",
+      chargeAmount: data.monthlyRent,
+      paymentAmount: 0,
+      paymentMethod: "",
+      checkNumber: "",
+      applyTo: "Rent",
+      notes: "",
+    });
   }
-  return p;
+  const fresh = await getProperty(p.id);
+  if (!fresh) throw new Error("Property was created but could not be loaded.");
+  return fresh;
 }
 
-export function updateProperty(id: string, data: Partial<Property>) {
-  const list = getProperties(); const idx = list.findIndex(p => p.id === id);
-  if (idx >= 0) { list[idx] = { ...list[idx], ...data, updatedAt: new Date().toISOString() }; setList(KEYS.PROPERTIES, list); }
+export async function updateProperty(id: string, data: Partial<Property>): Promise<void> {
+  const user = await requireUser();
+  const patch: Record<string, unknown> = {};
+  if (data.propertyName !== undefined) patch.property_name = data.propertyName;
+  if (data.address !== undefined) patch.address = data.address;
+  if (data.tenantName !== undefined) patch.tenant_name = data.tenantName;
+  if (data.tenantContact !== undefined) patch.tenant_contact = data.tenantContact;
+  if (data.tenantPhone !== undefined) patch.tenant_phone = data.tenantPhone;
+  if (data.tenantEmail !== undefined) patch.tenant_email = data.tenantEmail;
+  if (data.monthlyRent !== undefined) patch.monthly_rent = data.monthlyRent;
+  if (data.rentDueDay !== undefined) patch.rent_due_day = data.rentDueDay;
+  if (data.leaseStartDate !== undefined) patch.lease_start_date = data.leaseStartDate || null;
+  if (data.leaseEndDate !== undefined) patch.lease_end_date = data.leaseEndDate || null;
+  if (data.securityDeposit !== undefined) patch.security_deposit = data.securityDeposit;
+  if (data.status !== undefined) patch.status = data.status;
+  if (data.notes !== undefined) patch.notes = data.notes;
+  if (data.soldDate !== undefined) patch.sold_date = data.soldDate || null;
+  if (data.salePrice !== undefined) patch.sale_price = data.salePrice;
+  if (data.buyerName !== undefined) patch.buyer_name = data.buyerName;
+  if (data.saleNotes !== undefined) patch.sale_notes = data.saleNotes;
+  const { error } = await supabase
+    .from(T.PROPERTIES)
+    .update(patch)
+    .eq("user_id", user.id)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
-export function archiveProperty(id: string) { updateProperty(id, { status: "Closed" }); }
+export async function archiveProperty(id: string): Promise<void> {
+  await updateProperty(id, { status: "Closed" });
+}
+
+export async function markPropertySold(
+  id: string,
+  data: { soldDate: string; salePrice: number; buyerName?: string; saleNotes?: string }
+): Promise<void> {
+  await updateProperty(id, {
+    status: "Sold",
+    soldDate: data.soldDate,
+    salePrice: data.salePrice,
+    buyerName: (data.buyerName ?? "").trim(),
+    saleNotes: (data.saleNotes ?? "").trim(),
+  });
+}
+
+/** Removes property, cascaded transactions, related notes/documents/activities, and storage files. */
+export async function deleteProperty(id: string): Promise<void> {
+  const user = await requireUser();
+  const docs = await getDocuments("property", id);
+  const paths = docs.map((d) => d.storagePath).filter(Boolean) as string[];
+  if (paths.length > 0) {
+    const { error: se } = await supabase.storage.from(BARBARA_DOCUMENTS_BUCKET).remove(paths);
+    if (se) throw new Error(se.message);
+  }
+  const { error: d1 } = await supabase
+    .from(T.DOCUMENTS)
+    .delete()
+    .eq("user_id", user.id)
+    .eq("related_type", "property")
+    .eq("related_id", id);
+  if (d1) throw new Error(d1.message);
+  const { error: d2 } = await supabase
+    .from(T.NOTES)
+    .delete()
+    .eq("user_id", user.id)
+    .eq("related_type", "property")
+    .eq("related_id", id);
+  if (d2) throw new Error(d2.message);
+  const { error: d3 } = await supabase
+    .from(T.ACTIVITIES)
+    .delete()
+    .eq("user_id", user.id)
+    .eq("entity_type", "property")
+    .eq("entity_id", id);
+  if (d3) throw new Error(d3.message);
+  const { error: d4 } = await supabase.from(T.PROPERTIES).delete().eq("user_id", user.id).eq("id", id);
+  if (d4) throw new Error(d4.message);
+}
 
 // ============ PROPERTY TRANSACTIONS ============
-export function getPropertyTransactions(propertyId: string): PropertyTransaction[] {
-  return getList<PropertyTransaction>(KEYS.PROPERTY_TRANSACTIONS)
-    .filter(t => t.propertyId === propertyId)
-    .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
-}
-export function getAllPropertyTransactions(): PropertyTransaction[] { return getList<PropertyTransaction>(KEYS.PROPERTY_TRANSACTIONS); }
 
-export function addPropertyTransaction(data: Omit<PropertyTransaction, "id" | "createdAt">): PropertyTransaction {
-  const list = getList<PropertyTransaction>(KEYS.PROPERTY_TRANSACTIONS);
-  const txn: PropertyTransaction = { ...data, id: genId(), createdAt: new Date().toISOString() };
-  list.push(txn); setList(KEYS.PROPERTY_TRANSACTIONS, list);
-  const property = getProperty(data.propertyId);
+export async function getPropertyTransactions(propertyId: string): Promise<PropertyTransaction[]> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.PROP_TXN)
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("property_id", propertyId)
+    .order("txn_date", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []).map((r) => mapPropTxn(r as Record<string, unknown>));
+  return rows.sort(
+    (a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)
+  );
+}
+
+export async function getAllPropertyTransactions(): Promise<PropertyTransaction[]> {
+  const user = await requireUser();
+  const { data, error } = await supabase.from(T.PROP_TXN).select("*").eq("user_id", user.id);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => mapPropTxn(r as Record<string, unknown>));
+}
+
+export async function addPropertyTransaction(
+  data: Omit<PropertyTransaction, "id" | "createdAt">
+): Promise<PropertyTransaction> {
+  const user = await requireUser();
+  const row = {
+    user_id: user.id,
+    property_id: data.propertyId,
+    txn_date: data.date,
+    type: data.type,
+    description: data.description,
+    charge_amount: data.chargeAmount,
+    payment_amount: data.paymentAmount,
+    payment_method: data.paymentMethod,
+    check_number: data.checkNumber,
+    apply_to: data.applyTo,
+    notes: data.notes,
+  };
+  const { data: inserted, error } = await supabase.from(T.PROP_TXN).insert(row).select("*").single();
+  if (error) throw new Error(error.message);
+  const txn = mapPropTxn(inserted as Record<string, unknown>);
+  const property = await getProperty(data.propertyId);
   if (property) {
-    const actType = data.type === "payment" ? "payment" : data.type === "late_fee" ? "late_fee" : "charge";
-    addActivity({ date: data.date, type: actType, entityType: "property", entityId: data.propertyId,
-      entityName: property.propertyName, personName: property.tenantName,
-      amount: data.type === "payment" ? data.paymentAmount : data.chargeAmount, description: data.description || data.type });
+    const actType =
+      data.type === "payment" ? "payment" : data.type === "late_fee" ? "late_fee" : "charge";
+    await addActivity(user.id, {
+      date: data.date,
+      type: actType,
+      entityType: "property",
+      entityId: data.propertyId,
+      entityName: property.propertyName,
+      personName: property.tenantName,
+      amount:
+        data.type === "payment" ? data.paymentAmount : data.chargeAmount,
+      description: data.description || data.type,
+    });
   }
   return txn;
 }
 
 export function calculatePropertyBalance(transactions: PropertyTransaction[]): number {
-  let b = 0; for (const t of transactions) b += t.chargeAmount - t.paymentAmount; return Math.max(0, b);
+  let b = 0;
+  for (const t of transactions) b += t.chargeAmount - t.paymentAmount;
+  return Math.max(0, b);
 }
+
 export function getRunningBalanceTable(transactions: PropertyTransaction[]) {
-  let b = 0; return transactions.map(t => { b += t.chargeAmount - t.paymentAmount; return { ...t, runningBalance: b }; });
+  let b = 0;
+  return transactions.map((t) => {
+    b += t.chargeAmount - t.paymentAmount;
+    return { ...t, runningBalance: b };
+  });
 }
 
 // ============ LOANS ============
-export function getLoans(): Loan[] { return getList<Loan>(KEYS.LOANS); }
-export function getLoan(id: string): Loan | undefined { return getLoans().find(l => l.id === id); }
 
-export function addLoan(data: Omit<Loan, "id" | "createdAt" | "updatedAt">): Loan {
-  const list = getLoans(); const now = new Date().toISOString();
-  const loan: Loan = { ...data, id: genId(), createdAt: now, updatedAt: now };
-  list.push(loan); setList(KEYS.LOANS, list);
+export async function getLoans(): Promise<Loan[]> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.LOANS)
+    .select("*")
+    .eq("user_id", user.id)
+    .order("borrower_name");
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => mapLoan(r as Record<string, unknown>));
+}
+
+export async function getLoan(id: string): Promise<Loan | undefined> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.LOANS)
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return undefined;
+  return mapLoan(data as Record<string, unknown>);
+}
+
+export async function addLoan(data: Omit<Loan, "id" | "createdAt" | "updatedAt">): Promise<Loan> {
+  const user = await requireUser();
+  const row = {
+    user_id: user.id,
+    borrower_name: data.borrowerName,
+    borrower_phone: data.borrowerPhone,
+    borrower_email: data.borrowerEmail,
+    relationship: data.relationship,
+    original_amount: data.originalAmount,
+    loan_date: data.loanDate || null,
+    interest_rate: data.interestRate,
+    payment_due_date: data.paymentDueDate,
+    expected_monthly_payment: data.expectedMonthlyPayment,
+    status: data.status,
+    notes: data.notes,
+  };
+  const { data: inserted, error } = await supabase.from(T.LOANS).insert(row).select("*").single();
+  if (error) throw new Error(error.message);
+  const loan = mapLoan(inserted as Record<string, unknown>);
   if (data.originalAmount > 0) {
-    addLoanTransaction({ loanId: loan.id, date: data.loanDate || todayStr(), type: "charge",
-      description: "Original loan amount", chargeAmount: data.originalAmount,
-      paymentAmount: 0, paymentMethod: "", checkNumber: "", notes: "" });
+    await addLoanTransaction({
+      loanId: loan.id,
+      date: data.loanDate || todayStr(),
+      type: "charge",
+      description: "Original loan amount",
+      chargeAmount: data.originalAmount,
+      paymentAmount: 0,
+      paymentMethod: "",
+      checkNumber: "",
+      notes: "",
+    });
   }
-  return loan;
+  const fresh = await getLoan(loan.id);
+  if (!fresh) throw new Error("Loan was created but could not be loaded.");
+  return fresh;
 }
 
-export function updateLoan(id: string, data: Partial<Loan>) {
-  const list = getLoans(); const idx = list.findIndex(l => l.id === id);
-  if (idx >= 0) { list[idx] = { ...list[idx], ...data, updatedAt: new Date().toISOString() }; setList(KEYS.LOANS, list); }
+export async function updateLoan(id: string, data: Partial<Loan>): Promise<void> {
+  const user = await requireUser();
+  const patch: Record<string, unknown> = {};
+  if (data.borrowerName !== undefined) patch.borrower_name = data.borrowerName;
+  if (data.borrowerPhone !== undefined) patch.borrower_phone = data.borrowerPhone;
+  if (data.borrowerEmail !== undefined) patch.borrower_email = data.borrowerEmail;
+  if (data.relationship !== undefined) patch.relationship = data.relationship;
+  if (data.originalAmount !== undefined) patch.original_amount = data.originalAmount;
+  if (data.loanDate !== undefined) patch.loan_date = data.loanDate || null;
+  if (data.interestRate !== undefined) patch.interest_rate = data.interestRate;
+  if (data.paymentDueDate !== undefined) patch.payment_due_date = data.paymentDueDate;
+  if (data.expectedMonthlyPayment !== undefined)
+    patch.expected_monthly_payment = data.expectedMonthlyPayment;
+  if (data.status !== undefined) patch.status = data.status;
+  if (data.notes !== undefined) patch.notes = data.notes;
+  const { error } = await supabase.from(T.LOANS).update(patch).eq("user_id", user.id).eq("id", id);
+  if (error) throw new Error(error.message);
 }
-export function archiveLoan(id: string) { updateLoan(id, { status: "Written Off" }); }
+
+export async function archiveLoan(id: string): Promise<void> {
+  await updateLoan(id, { status: "Written Off" });
+}
 
 // ============ LOAN TRANSACTIONS ============
-export function getLoanTransactions(loanId: string): LoanTransaction[] {
-  return getList<LoanTransaction>(KEYS.LOAN_TRANSACTIONS)
-    .filter(t => t.loanId === loanId)
-    .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
-}
-export function getAllLoanTransactions(): LoanTransaction[] { return getList<LoanTransaction>(KEYS.LOAN_TRANSACTIONS); }
 
-export function addLoanTransaction(data: Omit<LoanTransaction, "id" | "createdAt">): LoanTransaction {
-  const list = getList<LoanTransaction>(KEYS.LOAN_TRANSACTIONS);
-  const txn: LoanTransaction = { ...data, id: genId(), createdAt: new Date().toISOString() };
-  list.push(txn); setList(KEYS.LOAN_TRANSACTIONS, list);
-  const loan = getLoan(data.loanId);
+export async function getLoanTransactions(loanId: string): Promise<LoanTransaction[]> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.LOAN_TXN)
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("loan_id", loanId)
+    .order("txn_date", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []).map((r) => mapLoanTxn(r as Record<string, unknown>));
+  return rows.sort(
+    (a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)
+  );
+}
+
+export async function getAllLoanTransactions(): Promise<LoanTransaction[]> {
+  const user = await requireUser();
+  const { data, error } = await supabase.from(T.LOAN_TXN).select("*").eq("user_id", user.id);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => mapLoanTxn(r as Record<string, unknown>));
+}
+
+export async function addLoanTransaction(
+  data: Omit<LoanTransaction, "id" | "createdAt">
+): Promise<LoanTransaction> {
+  const user = await requireUser();
+  const row = {
+    user_id: user.id,
+    loan_id: data.loanId,
+    txn_date: data.date,
+    type: data.type,
+    description: data.description,
+    charge_amount: data.chargeAmount,
+    payment_amount: data.paymentAmount,
+    payment_method: data.paymentMethod,
+    check_number: data.checkNumber,
+    notes: data.notes,
+  };
+  const { data: inserted, error } = await supabase.from(T.LOAN_TXN).insert(row).select("*").single();
+  if (error) throw new Error(error.message);
+  const txn = mapLoanTxn(inserted as Record<string, unknown>);
+  const loan = await getLoan(data.loanId);
   if (loan) {
     const actType = data.type === "payment" ? "payment" : "charge";
-    addActivity({ date: data.date, type: actType, entityType: "loan", entityId: data.loanId,
-      entityName: `Loan to ${loan.borrowerName}`, personName: loan.borrowerName,
-      amount: data.type === "payment" ? data.paymentAmount : data.chargeAmount, description: data.description || data.type });
+    await addActivity(user.id, {
+      date: data.date,
+      type: actType,
+      entityType: "loan",
+      entityId: data.loanId,
+      entityName: `Loan to ${loan.borrowerName}`,
+      personName: loan.borrowerName,
+      amount: data.type === "payment" ? data.paymentAmount : data.chargeAmount,
+      description: data.description || data.type,
+    });
   }
   return txn;
 }
 
 export function calculateLoanBalance(transactions: LoanTransaction[]): number {
-  let b = 0; for (const t of transactions) b += t.chargeAmount - t.paymentAmount; return Math.max(0, b);
+  let b = 0;
+  for (const t of transactions) b += t.chargeAmount - t.paymentAmount;
+  return Math.max(0, b);
 }
+
 export function getLoanRunningBalanceTable(transactions: LoanTransaction[]) {
-  let b = 0; return transactions.map(t => { b += t.chargeAmount - t.paymentAmount; return { ...t, runningBalance: b }; });
+  let b = 0;
+  return transactions.map((t) => {
+    b += t.chargeAmount - t.paymentAmount;
+    return { ...t, runningBalance: b };
+  });
 }
 
 // ============ NOTES ============
-export function getNotes(relatedType: "property" | "loan" | "general", relatedId: string): Note[] {
-  const list = getList<Note>(KEYS.NOTES);
-  if (relatedType === "general") return list.filter(n => n.relatedType === "general").sort((a, b) => b.noteDate.localeCompare(a.noteDate));
-  return list.filter(n => n.relatedType === relatedType && n.relatedId === relatedId).sort((a, b) => b.noteDate.localeCompare(a.noteDate));
-}
-export function getAllNotes(): Note[] { return getList<Note>(KEYS.NOTES); }
 
-export function addNote(data: Omit<Note, "id" | "createdAt">): Note {
-  const list = getList<Note>(KEYS.NOTES);
-  const note: Note = { ...data, id: genId(), createdAt: new Date().toISOString() };
-  list.push(note); setList(KEYS.NOTES, list);
-  let entityName = ""; let personName = "";
-  if (data.relatedType === "property") { const p = getProperty(data.relatedId); if (p) { entityName = p.propertyName; personName = p.tenantName; } }
-  else if (data.relatedType === "loan") { const l = getLoan(data.relatedId); if (l) { entityName = `Loan to ${l.borrowerName}`; personName = l.borrowerName; } }
-  else { entityName = "General Note"; }
-  addActivity({ date: data.noteDate, type: "note", entityType: data.relatedType === "general" ? "property" : data.relatedType,
-    entityId: data.relatedId, entityName, personName, amount: 0, description: data.noteText.substring(0, 100) });
+export async function getNotes(
+  relatedType: "property" | "loan" | "general",
+  relatedId: string
+): Promise<Note[]> {
+  const user = await requireUser();
+  let q = supabase.from(T.NOTES).select("*").eq("user_id", user.id);
+  if (relatedType === "general") {
+    q = q.eq("related_type", "general");
+  } else {
+    q = q.eq("related_type", relatedType).eq("related_id", relatedId);
+  }
+  const { data, error } = await q.order("note_date", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => mapNote(r as Record<string, unknown>));
+}
+
+export async function getAllNotes(): Promise<Note[]> {
+  const user = await requireUser();
+  const { data, error } = await supabase.from(T.NOTES).select("*").eq("user_id", user.id);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => mapNote(r as Record<string, unknown>));
+}
+
+export async function addNote(data: Omit<Note, "id" | "createdAt">): Promise<Note> {
+  const user = await requireUser();
+  const row = {
+    user_id: user.id,
+    related_type: data.relatedType,
+    related_id: data.relatedId,
+    note_date: data.noteDate,
+    note_text: data.noteText,
+    reminder_date: data.reminderDate || null,
+  };
+  const { data: inserted, error } = await supabase.from(T.NOTES).insert(row).select("*").single();
+  if (error) throw new Error(error.message);
+  const note = mapNote(inserted as Record<string, unknown>);
+  let entityName = "";
+  let personName = "";
+  if (data.relatedType === "property") {
+    const p = await getProperty(data.relatedId);
+    if (p) {
+      entityName = p.propertyName;
+      personName = p.tenantName;
+    }
+  } else if (data.relatedType === "loan") {
+    const l = await getLoan(data.relatedId);
+    if (l) {
+      entityName = `Loan to ${l.borrowerName}`;
+      personName = l.borrowerName;
+    }
+  } else entityName = "General Note";
+  await addActivity(user.id, {
+    date: data.noteDate,
+    type: "note",
+    entityType: data.relatedType === "general" ? "property" : data.relatedType,
+    entityId: data.relatedId,
+    entityName,
+    personName,
+    amount: 0,
+    description: data.noteText.substring(0, 100),
+  });
   return note;
 }
 
 // ============ DOCUMENTS ============
-export function getDocuments(relatedType?: string, relatedId?: string): Document[] {
-  const list = getList<Document>(KEYS.DOCUMENTS);
-  if (relatedType && relatedId) return list.filter(d => d.relatedType === relatedType && d.relatedId === relatedId);
-  if (relatedType) return list.filter(d => d.relatedType === relatedType);
-  return list;
+
+export async function getDocuments(relatedType?: string, relatedId?: string): Promise<Document[]> {
+  const user = await requireUser();
+  let q = supabase.from(T.DOCUMENTS).select("*").eq("user_id", user.id);
+  if (relatedType && relatedId !== undefined)
+    q = q.eq("related_type", relatedType).eq("related_id", relatedId);
+  else if (relatedType) q = q.eq("related_type", relatedType);
+  const { data, error } = await q.order("uploaded_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => mapDocument(r as Record<string, unknown>));
 }
 
-export function addDocument(data: Omit<Document, "id" | "uploadedAt">): Document {
-  const list = getList<Document>(KEYS.DOCUMENTS);
-  const doc: Document = { ...data, id: genId(), uploadedAt: new Date().toISOString() };
-  list.push(doc); setList(KEYS.DOCUMENTS, list);
+export async function addDocument(
+  data: Omit<Document, "id" | "uploadedAt"> & { id?: string }
+): Promise<Document> {
+  const user = await requireUser();
+  const row: Record<string, unknown> = {
+    user_id: user.id,
+    document_name: data.documentName,
+    document_type: data.documentType,
+    related_type: data.relatedType,
+    related_id: data.relatedId,
+    storage_path: data.storagePath ?? null,
+    file_name: data.originalFileName ?? null,
+    mime_type: data.mimeType ?? null,
+    size_bytes: data.sizeBytes ?? null,
+    template_body: data.relatedType === "template" ? data.fileUri || null : null,
+    notes: data.notes,
+  };
+  if (data.id) row.id = data.id;
+  const { data: inserted, error } = await supabase.from(T.DOCUMENTS).insert(row).select("*").single();
+  if (error) throw new Error(error.message);
+  const doc = mapDocument(inserted as Record<string, unknown>);
   if (data.relatedType !== "template") {
-    let entityName = ""; let personName = "";
-    if (data.relatedType === "property" && data.relatedId) { const p = getProperty(data.relatedId); if (p) { entityName = p.propertyName; personName = p.tenantName; } }
-    else if (data.relatedType === "loan" && data.relatedId) { const l = getLoan(data.relatedId); if (l) { entityName = `Loan to ${l.borrowerName}`; personName = l.borrowerName; } }
-    addActivity({ date: todayStr(), type: "document", entityType: (data.relatedType === "property" || data.relatedType === "loan") ? data.relatedType : "property",
-      entityId: data.relatedId || "", entityName: entityName || "General", personName, amount: 0, description: `Uploaded: ${data.documentName}` });
+    let entityName = "";
+    let personName = "";
+    if (data.relatedType === "property" && data.relatedId) {
+      const p = await getProperty(data.relatedId);
+      if (p) {
+        entityName = p.propertyName;
+        personName = p.tenantName;
+      }
+    } else if (data.relatedType === "loan" && data.relatedId) {
+      const l = await getLoan(data.relatedId);
+      if (l) {
+        entityName = `Loan to ${l.borrowerName}`;
+        personName = l.borrowerName;
+      }
+    }
+    await addActivity(user.id, {
+      date: todayStr(),
+      type: "document",
+      entityType:
+        data.relatedType === "property" || data.relatedType === "loan" ? data.relatedType : "property",
+      entityId: data.relatedId || "",
+      entityName: entityName || "General",
+      personName,
+      amount: 0,
+      description: `Uploaded: ${data.documentName}`,
+    });
   }
   return doc;
 }
 
-// ============ ACTIVITIES ============
-export function getActivities(limit = 20): ActivityItem[] {
-  return getList<ActivityItem>(KEYS.ACTIVITIES).sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)).slice(0, limit);
+/** Upload a file to private bucket barbara-documents and insert barbara_documents row. */
+export async function addDocumentWithFile(
+  file: File,
+  meta: {
+    documentName: string;
+    documentType: DocumentType;
+    relatedType: Document["relatedType"];
+    relatedId: string;
+    notes: string;
+  }
+): Promise<Document> {
+  const user = await requireUser();
+  let mime = file.type.toLowerCase().split(";")[0].trim();
+  if (!mime && /\.(heic|heif)$/i.test(file.name)) mime = "image/heic";
+  if (!mime && /\.webp$/i.test(file.name)) mime = "image/webp";
+  if (!isAllowedDocumentMime(mime)) {
+    throw new Error(
+      "This file type is not supported. Use PDF, Word, JPG, PNG, HEIC, or WEBP."
+    );
+  }
+  const docId = crypto.randomUUID();
+  const path = `${user.id}/${docId}/${safeUploadFileName(file.name)}`;
+  const { error: upErr } = await supabase.storage
+    .from(BARBARA_DOCUMENTS_BUCKET)
+    .upload(path, file, { contentType: mime || "application/octet-stream", upsert: false });
+  if (upErr) throw new Error(upErr.message);
+  return addDocument({
+    id: docId,
+    documentName: meta.documentName.trim(),
+    documentType: meta.documentType,
+    relatedType: meta.relatedType,
+    relatedId: meta.relatedId,
+    fileUri: "",
+    notes: meta.notes.trim(),
+    storagePath: path,
+    originalFileName: file.name,
+    mimeType: mime,
+    sizeBytes: file.size,
+  });
 }
-function addActivity(data: Omit<ActivityItem, "id">) {
-  const list = getList<ActivityItem>(KEYS.ACTIVITIES);
-  list.push({ ...data, id: genId() });
-  if (list.length > 200) list.splice(0, list.length - 200);
-  setList(KEYS.ACTIVITIES, list);
+
+export async function getDocumentSignedUrl(
+  storagePath: string,
+  expiresSec = 3600
+): Promise<string | null> {
+  await requireUser();
+  const { data, error } = await supabase.storage
+    .from(BARBARA_DOCUMENTS_BUCKET)
+    .createSignedUrl(storagePath, expiresSec);
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
+}
+
+// ============ ACTIVITIES ============
+
+export async function getActivities(limit = 20): Promise<ActivityItem[]> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.ACTIVITIES)
+    .select("*")
+    .eq("user_id", user.id)
+    .order("activity_date", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []).map((r) => mapActivity(r as Record<string, unknown>));
+  return rows.sort(
+    (a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)
+  );
 }
 
 // ============ SEARCH ============
-export function searchAll(query: string) {
+
+export async function searchAll(query: string) {
   const q = query.toLowerCase().trim();
-  if (!q) return { properties: [] as Property[], loans: [] as Loan[], notes: [] as Note[], documents: [] as Document[] };
-  const properties = getProperties().filter(p => [p.propertyName, p.address, p.tenantName, p.tenantContact, p.notes].some(f => f?.toLowerCase().includes(q)));
-  const loans = getLoans().filter(l => [l.borrowerName, l.borrowerPhone, l.borrowerEmail, l.relationship, l.notes].some(f => f?.toLowerCase().includes(q)));
-  const notes = getAllNotes().filter(n => n.noteText?.toLowerCase().includes(q));
-  const documents = getDocuments().filter(d => [d.documentName, d.notes, d.documentType].some(f => f?.toLowerCase().includes(q)));
+  if (!q)
+    return {
+      properties: [] as Property[],
+      loans: [] as Loan[],
+      notes: [] as Note[],
+      documents: [] as Document[],
+    };
+  const properties = (await getProperties()).filter((p) =>
+    [p.propertyName, p.address, p.tenantName, p.tenantContact, p.notes].some((f) =>
+      f?.toLowerCase().includes(q)
+    )
+  );
+  const loans = (await getLoans()).filter((l) =>
+    [l.borrowerName, l.borrowerPhone, l.borrowerEmail, l.relationship, l.notes].some((f) =>
+      f?.toLowerCase().includes(q)
+    )
+  );
+  const notes = (await getAllNotes()).filter((n) => n.noteText?.toLowerCase().includes(q));
+  const documents = (await getDocuments()).filter((d) =>
+    [d.documentName, d.notes, d.documentType].some((f) => f?.toLowerCase().includes(q))
+  );
   return { properties, loans, notes, documents };
 }
 
 // ============ DASHBOARD STATS ============
-export function getDashboardStats(year?: number) {
-  const targetYear = year || new Date().getFullYear(); const yearStr = targetYear.toString();
-  const propTxns = getAllPropertyTransactions(); const loanTxns = getAllLoanTransactions();
-  const properties = getProperties(); const loans = getLoans();
-  const yearPropTxns = propTxns.filter(t => t.date.startsWith(yearStr));
-  const yearLoanTxns = loanTxns.filter(t => t.date.startsWith(yearStr));
-  const totalRentalIncome = yearPropTxns.filter(t => t.type === "payment").reduce((s, t) => s + t.paymentAmount, 0);
-  const totalLoanPayments = yearLoanTxns.filter(t => t.type === "payment").reduce((s, t) => s + t.paymentAmount, 0);
-  const totalLateFees = yearPropTxns.filter(t => t.type === "late_fee").reduce((s, t) => s + t.chargeAmount, 0);
+
+export async function getDashboardStats(year?: number) {
+  const targetYear = year || new Date().getFullYear();
+  const yearStr = targetYear.toString();
+  const propTxns = await getAllPropertyTransactions();
+  const loanTxns = await getAllLoanTransactions();
+  const properties = await getProperties();
+  const loans = await getLoans();
+  const yearPropTxns = propTxns.filter((t) => t.date.startsWith(yearStr));
+  const yearLoanTxns = loanTxns.filter((t) => t.date.startsWith(yearStr));
+  const totalRentalIncome = yearPropTxns
+    .filter((t) => t.type === "payment")
+    .reduce((s, t) => s + t.paymentAmount, 0);
+  const totalLoanPayments = yearLoanTxns
+    .filter((t) => t.type === "payment")
+    .reduce((s, t) => s + t.paymentAmount, 0);
+  const totalLateFees = yearPropTxns
+    .filter((t) => t.type === "late_fee")
+    .reduce((s, t) => s + t.chargeAmount, 0);
   let unpaidRent = 0;
-  for (const p of properties.filter(p => p.status === "Active" || p.status === "Past Due")) {
-    unpaidRent += calculatePropertyBalance(propTxns.filter(t => t.propertyId === p.id));
+  for (const p of properties.filter((p) => p.status === "Active" || p.status === "Past Due")) {
+    unpaidRent += calculatePropertyBalance(propTxns.filter((t) => t.propertyId === p.id));
   }
   let openLoanBalances = 0;
-  for (const l of loans.filter(l => l.status === "Active" || l.status === "Past Due")) {
-    openLoanBalances += calculateLoanBalance(loanTxns.filter(t => t.loanId === l.id));
+  for (const l of loans.filter((l) => l.status === "Active" || l.status === "Past Due")) {
+    openLoanBalances += calculateLoanBalance(loanTxns.filter((t) => t.loanId === l.id));
   }
   return { totalRentalIncome, totalLoanPayments, totalLateFees, unpaidRent, openLoanBalances };
 }
 
 // ============ TAX REPORTS ============
-export interface PropertyTaxReport { property: Property; totalRentReceived: number; totalLateFees: number; totalOtherCharges: number; totalPayments: number; unpaidBalance: number; transactions: PropertyTransaction[]; }
-export interface LoanTaxReport { loan: Loan; originalAmount: number; currentBalance: number; totalPayments: number; totalCharges: number; transactions: LoanTransaction[]; }
 
-export function generatePropertyTaxReport(year: number): PropertyTaxReport[] {
-  const yearStr = year.toString(); const properties = getProperties(); const allTxns = getAllPropertyTransactions();
+export interface PropertyTaxReport {
+  property: Property;
+  totalRentReceived: number;
+  totalLateFees: number;
+  totalOtherCharges: number;
+  totalPayments: number;
+  unpaidBalance: number;
+  transactions: PropertyTransaction[];
+}
+export interface LoanTaxReport {
+  loan: Loan;
+  originalAmount: number;
+  currentBalance: number;
+  totalPayments: number;
+  totalCharges: number;
+  transactions: LoanTransaction[];
+}
+
+export async function generatePropertyTaxReport(year: number): Promise<PropertyTaxReport[]> {
+  const yearStr = year.toString();
+  const properties = await getProperties();
+  const allTxns = await getAllPropertyTransactions();
   const reports: PropertyTaxReport[] = [];
   for (const property of properties) {
-    const propTxns = allTxns.filter(t => t.propertyId === property.id);
-    const yearTxns = propTxns.filter(t => t.date.startsWith(yearStr));
+    const propTxns = allTxns.filter((t) => t.propertyId === property.id);
+    const yearTxns = propTxns.filter((t) => t.date.startsWith(yearStr));
     if (yearTxns.length === 0 && property.status === "Closed") continue;
-    const totalRentReceived = yearTxns.filter(t => t.type === "payment" && t.applyTo === "Rent").reduce((s, t) => s + t.paymentAmount, 0);
-    const totalLateFees = yearTxns.filter(t => t.type === "payment" && t.applyTo === "Late Fee").reduce((s, t) => s + t.paymentAmount, 0);
-    const totalOtherCharges = yearTxns.filter(t => t.type === "payment" && t.applyTo === "Other Charge").reduce((s, t) => s + t.paymentAmount, 0);
-    const totalPayments = yearTxns.filter(t => t.type === "payment").reduce((s, t) => s + t.paymentAmount, 0);
-    reports.push({ property, totalRentReceived, totalLateFees, totalOtherCharges, totalPayments, unpaidBalance: calculatePropertyBalance(propTxns), transactions: yearTxns });
+    const totalRentReceived = yearTxns
+      .filter((t) => t.type === "payment" && t.applyTo === "Rent")
+      .reduce((s, t) => s + t.paymentAmount, 0);
+    const totalLateFees = yearTxns
+      .filter((t) => t.type === "payment" && t.applyTo === "Late Fee")
+      .reduce((s, t) => s + t.paymentAmount, 0);
+    const totalOtherCharges = yearTxns
+      .filter((t) => t.type === "payment" && t.applyTo === "Other Charge")
+      .reduce((s, t) => s + t.paymentAmount, 0);
+    const totalPayments = yearTxns
+      .filter((t) => t.type === "payment")
+      .reduce((s, t) => s + t.paymentAmount, 0);
+    reports.push({
+      property,
+      totalRentReceived,
+      totalLateFees,
+      totalOtherCharges,
+      totalPayments,
+      unpaidBalance: calculatePropertyBalance(propTxns),
+      transactions: yearTxns,
+    });
   }
   return reports;
 }
 
-export function generateLoanTaxReport(year: number): LoanTaxReport[] {
-  const yearStr = year.toString(); const loans = getLoans(); const allTxns = getAllLoanTransactions();
+export async function generateLoanTaxReport(year: number): Promise<LoanTaxReport[]> {
+  const yearStr = year.toString();
+  const loans = await getLoans();
+  const allTxns = await getAllLoanTransactions();
   const reports: LoanTaxReport[] = [];
   for (const loan of loans) {
-    const loanTxns = allTxns.filter(t => t.loanId === loan.id);
-    const yearTxns = loanTxns.filter(t => t.date.startsWith(yearStr));
+    const loanTxns = allTxns.filter((t) => t.loanId === loan.id);
+    const yearTxns = loanTxns.filter((t) => t.date.startsWith(yearStr));
     if (yearTxns.length === 0 && loan.status === "Written Off") continue;
-    const totalPayments = yearTxns.filter(t => t.type === "payment").reduce((s, t) => s + t.paymentAmount, 0);
-    const totalCharges = yearTxns.filter(t => t.type === "charge").reduce((s, t) => s + t.chargeAmount, 0);
-    reports.push({ loan, originalAmount: loan.originalAmount, currentBalance: calculateLoanBalance(loanTxns), totalPayments, totalCharges, transactions: yearTxns });
+    const totalPayments = yearTxns
+      .filter((t) => t.type === "payment")
+      .reduce((s, t) => s + t.paymentAmount, 0);
+    const totalCharges = yearTxns
+      .filter((t) => t.type === "charge")
+      .reduce((s, t) => s + t.chargeAmount, 0);
+    reports.push({
+      loan,
+      originalAmount: loan.originalAmount,
+      currentBalance: calculateLoanBalance(loanTxns),
+      totalPayments,
+      totalCharges,
+      transactions: yearTxns,
+    });
   }
   return reports;
 }
 
 // ============ EXPORT / CLEAR ============
-export function exportAllData(): string {
-  return JSON.stringify({
-    exportDate: new Date().toISOString(), properties: getProperties(),
-    propertyTransactions: getAllPropertyTransactions(), loans: getLoans(),
-    loanTransactions: getAllLoanTransactions(), notes: getAllNotes(),
-    documents: getDocuments(), activities: getActivities(1000),
-  }, null, 2);
+
+export async function exportAllData(): Promise<string> {
+  const [
+    properties,
+    propertyTransactions,
+    loans,
+    loanTransactions,
+    notes,
+    documents,
+    activities,
+  ] = await Promise.all([
+    getProperties(),
+    getAllPropertyTransactions(),
+    getLoans(),
+    getAllLoanTransactions(),
+    getAllNotes(),
+    getDocuments(),
+    getActivities(1000),
+  ]);
+  return JSON.stringify(
+    {
+      exportDate: new Date().toISOString(),
+      properties,
+      propertyTransactions,
+      loans,
+      loanTransactions,
+      notes,
+      documents,
+      activities,
+    },
+    null,
+    2
+  );
 }
 
-export function clearAllData() {
-  Object.values(KEYS).forEach(k => localStorage.removeItem(k));
+export async function clearAllData(): Promise<void> {
+  const user = await requireUser();
+  const uid = user.id;
+
+  const { data: docRows } = await supabase
+    .from(T.DOCUMENTS)
+    .select("storage_path")
+    .eq("user_id", uid)
+    .not("storage_path", "is", null);
+  const paths = (docRows ?? [])
+    .map((r) => r.storage_path as string)
+    .filter(Boolean);
+  if (paths.length > 0) {
+    await supabase.storage.from(BARBARA_DOCUMENTS_BUCKET).remove(paths);
+  }
+
+  const { error: e1 } = await supabase.from(T.ACTIVITIES).delete().eq("user_id", uid);
+  if (e1) throw new Error(e1.message);
+  const { error: e2 } = await supabase.from(T.NOTES).delete().eq("user_id", uid);
+  if (e2) throw new Error(e2.message);
+  const { error: e3 } = await supabase.from(T.PROP_TXN).delete().eq("user_id", uid);
+  if (e3) throw new Error(e3.message);
+  const { error: e4 } = await supabase.from(T.LOAN_TXN).delete().eq("user_id", uid);
+  if (e4) throw new Error(e4.message);
+  const { error: e5 } = await supabase.from(T.DOCUMENTS).delete().eq("user_id", uid);
+  if (e5) throw new Error(e5.message);
+  const { error: e6 } = await supabase.from(T.PROPERTIES).delete().eq("user_id", uid);
+  if (e6) throw new Error(e6.message);
+  const { error: e7 } = await supabase.from(T.LOANS).delete().eq("user_id", uid);
+  if (e7) throw new Error(e7.message);
 }

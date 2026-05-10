@@ -11,6 +11,7 @@ export function statusBadge(status: string): string {
     case "Active": return "badge-active";
     case "Past Due": return "badge-past-due";
     case "Closed": case "Written Off": return "badge-closed";
+    case "Sold": return "badge-sold";
     case "Vacant": return "badge-vacant";
     case "Paid Off": return "badge-paid";
     default: return "";

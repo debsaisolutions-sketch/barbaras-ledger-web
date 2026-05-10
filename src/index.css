@@ -113,6 +113,7 @@ tr:hover td { background: #f8f9fa; }
 .badge-active { background: var(--success-bg); color: var(--success); }
 .badge-past-due { background: var(--error-bg); color: var(--error); }
 .badge-closed { background: #F3F4F6; color: #6B7280; }
+.badge-sold { background: #E0E7FF; color: #4338CA; }
 .badge-vacant { background: var(--warning-bg); color: var(--warning); }
 .badge-paid { background: var(--success-bg); color: var(--success); }
 
