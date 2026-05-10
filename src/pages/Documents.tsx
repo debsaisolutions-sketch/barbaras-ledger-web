@@ -67,6 +67,7 @@ export default function Documents() {
     "Lease",
     "Loan Agreement",
     "Receipt",
+    "Payment Proof",
     "Tax Document",
     "Other",
   ];
@@ -325,6 +326,7 @@ export default function Documents() {
                   <option>Lease</option>
                   <option>Loan Agreement</option>
                   <option>Receipt</option>
+                  <option>Payment Proof</option>
                   <option>Tax Document</option>
                   <option>Other</option>
                 </select>

@@ -456,6 +456,7 @@ export default function PropertyDetail() {
                       {t.description}
                       {t.paymentMethod ? ` (${t.paymentMethod})` : ""}
                       {t.checkNumber ? ` #${t.checkNumber}` : ""}
+                      {t.referenceNumber ? ` · Ref: ${t.referenceNumber}` : ""}
                     </td>
                     <td style={{ color: t.chargeAmount > 0 ? "var(--error)" : "" }}>
                       {t.chargeAmount > 0 ? fmtCurrency(t.chargeAmount) : ""}

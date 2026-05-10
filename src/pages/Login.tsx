@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { DEFAULT_LEDGER_PRODUCT_NAME, DEFAULT_LEDGER_SUBTITLE } from "../store";
 
 export default function Login() {
   const { user, signIn, signUp } = useAuth();
@@ -45,8 +46,9 @@ export default function Login() {
   return (
     <div style={{ maxWidth: 420, margin: "48px auto", padding: "0 16px" }}>
       <div className="sidebar-brand" style={{ marginBottom: 24, textAlign: "center" }}>
-        <h1 style={{ fontSize: 28 }}>Barbara&apos;s Ledger</h1>
-        <p style={{ color: "var(--muted)" }}>Sign in to view your records</p>
+        <h1 style={{ fontSize: 28 }}>{DEFAULT_LEDGER_PRODUCT_NAME}</h1>
+        <p style={{ color: "var(--muted)" }}>{DEFAULT_LEDGER_SUBTITLE}</p>
+        <p style={{ color: "var(--muted)", marginTop: 8, fontSize: 15 }}>Sign in to view your records</p>
       </div>
       <div className="card">
         <h2 style={{ marginBottom: 16 }}>{mode === "signin" ? "Sign in" : "Create account"}</h2>

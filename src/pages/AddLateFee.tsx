@@ -32,6 +32,7 @@ export default function AddLateFee() {
         paymentAmount: 0,
         paymentMethod: "",
         checkNumber: "",
+        referenceNumber: "",
         applyTo: "Late Fee",
         notes: form.notes.trim(),
       });

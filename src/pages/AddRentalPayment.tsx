@@ -3,6 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   getProperties,
   addPropertyTransaction,
+  addDocumentWithFile,
+  PAYMENT_METHOD_OPTIONS,
   type Property,
   type PaymentMethod,
   type ApplyTo,
@@ -20,9 +22,11 @@ export default function AddRentalPayment() {
     amount: "",
     method: "Cash" as PaymentMethod,
     checkNumber: "",
+    referenceNumber: "",
     applyTo: "Rent" as ApplyTo,
     notes: "",
   });
+  const [attachment, setAttachment] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -61,7 +65,7 @@ export default function AddRentalPayment() {
     }
     try {
       setSaving(true);
-      await addPropertyTransaction({
+      const txn = await addPropertyTransaction({
         propertyId: form.propertyId,
         date: form.date,
         type: "payment",
@@ -70,9 +74,21 @@ export default function AddRentalPayment() {
         paymentAmount: parseFloat(form.amount),
         paymentMethod: form.method,
         checkNumber: form.checkNumber.trim(),
+        referenceNumber: form.referenceNumber.trim(),
         applyTo: form.applyTo,
         notes: form.notes.trim(),
       });
+      if (attachment) {
+        const baseName = attachment.name.trim() || "payment-proof";
+        await addDocumentWithFile(attachment, {
+          documentName: baseName,
+          documentType: "Payment Proof",
+          relatedType: "property",
+          relatedId: form.propertyId,
+          notes: `Payment ${form.date} — ${form.method}`,
+          propertyTransactionId: txn.id,
+        });
+      }
       refresh();
       alert("Saved. Payment recorded.");
       navigate(id ? `/properties/${id}` : "/properties");
@@ -124,16 +140,20 @@ export default function AddRentalPayment() {
           </div>
           <div className="form-row">
             <div className="form-group">
-              <label>Payment Method</label>
-              <select value={form.method} onChange={(e) => set("method", e.target.value)}>
-                <option>Cash</option>
-                <option>Check</option>
-                <option>Bank Transfer</option>
-                <option>Other</option>
+              <label>Payment method</label>
+              <select
+                value={form.method}
+                onChange={(e) => set("method", e.target.value as PaymentMethod)}
+              >
+                {PAYMENT_METHOD_OPTIONS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="form-group">
-              <label>Apply To</label>
+              <label>Apply to</label>
               <select value={form.applyTo} onChange={(e) => set("applyTo", e.target.value)}>
                 <option>Rent</option>
                 <option>Late Fee</option>
@@ -141,19 +161,44 @@ export default function AddRentalPayment() {
               </select>
             </div>
           </div>
+          {form.method === "Direct deposit" && (
+            <p style={{ color: "var(--muted)", fontSize: 15, lineHeight: 1.5, marginBottom: 12 }}>
+              If this payment was deposited directly into your bank account, enter it here after checking
+              your bank account.
+            </p>
+          )}
           {form.method === "Check" && (
             <div className="form-group">
-              <label>Check Number</label>
+              <label>Check number</label>
               <input value={form.checkNumber} onChange={(e) => set("checkNumber", e.target.value)} />
             </div>
           )}
           <div className="form-group">
-            <label>Notes</label>
+            <label>Reference number (optional)</label>
+            <input
+              value={form.referenceNumber}
+              onChange={(e) => set("referenceNumber", e.target.value)}
+              placeholder="Confirmation, Zelle/Venmo ID, transfer ref…"
+            />
+          </div>
+          <div className="form-group">
+            <label>Payment note (optional)</label>
             <textarea
               value={form.notes}
               onChange={(e) => set("notes", e.target.value)}
               style={{ minHeight: 80 }}
             />
+          </div>
+          <div className="form-group">
+            <label>Attach check photo, receipt, or payment proof (optional)</label>
+            <input
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg,.heic,.heif,.webp,image/*,application/pdf"
+              onChange={(e) => setAttachment(e.target.files?.[0] ?? null)}
+            />
+            <p style={{ color: "var(--muted)", fontSize: 14, marginTop: 8 }}>
+              PDF or image. Saved privately in your documents.
+            </p>
           </div>
           <div style={{ display: "flex", gap: 12 }}>
             <button type="submit" className="btn btn-primary btn-lg" disabled={saving}>

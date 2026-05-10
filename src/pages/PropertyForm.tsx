@@ -27,6 +27,8 @@ export default function PropertyForm() {
     salePrice: "",
     buyerName: "",
     saleNotes: "",
+    nextReminderDate: "",
+    reminderNote: "",
   });
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
@@ -57,6 +59,8 @@ export default function PropertyForm() {
           salePrice: p.salePrice != null ? String(p.salePrice) : "",
           buyerName: p.buyerName,
           saleNotes: p.saleNotes,
+          nextReminderDate: p.nextReminderDate,
+          reminderNote: p.reminderNote,
         });
       } catch (e) {
         if (!cancelled) alert((e as Error).message || "Could not load property.");
@@ -97,6 +101,8 @@ export default function PropertyForm() {
       salePrice: salePriceNum !== null && !Number.isNaN(salePriceNum) ? salePriceNum : null,
       buyerName: form.buyerName.trim(),
       saleNotes: form.saleNotes.trim(),
+      nextReminderDate: form.nextReminderDate,
+      reminderNote: form.reminderNote.trim(),
     };
     try {
       setSaving(true);
@@ -265,6 +271,27 @@ export default function PropertyForm() {
               </div>
             </>
           )}
+          <div className="form-row">
+            <div className="form-group">
+              <label>Next reminder date</label>
+              <input
+                type="date"
+                value={form.nextReminderDate}
+                onChange={(e) => set("nextReminderDate", e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label>Reminder note</label>
+              <input
+                value={form.reminderNote}
+                onChange={(e) => set("reminderNote", e.target.value)}
+                placeholder="e.g. Check bank for direct deposit"
+              />
+            </div>
+          </div>
+          <p style={{ color: "var(--muted)", fontSize: 14, marginTop: -8, marginBottom: 16 }}>
+            Optional. Examples: tenant rent due, follow up on late payment, lease ending soon.
+          </p>
           <div className="form-group">
             <label>Notes</label>
             <textarea

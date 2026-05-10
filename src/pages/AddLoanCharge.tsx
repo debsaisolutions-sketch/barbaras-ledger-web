@@ -33,6 +33,7 @@ export default function AddLoanCharge() {
         paymentAmount: 0,
         paymentMethod: "",
         checkNumber: "",
+        referenceNumber: "",
         notes: form.notes.trim(),
       });
       refresh();

@@ -5,7 +5,28 @@ import { supabase } from "./lib/supabase";
 
 export type PropertyStatus = "Active" | "Vacant" | "Past Due" | "Closed" | "Sold";
 export type LoanStatus = "Active" | "Paid Off" | "Past Due" | "Written Off";
-export type PaymentMethod = "Cash" | "Check" | "Bank Transfer" | "Other";
+
+export const PAYMENT_METHOD_OPTIONS = [
+  "Cash",
+  "Check",
+  "Direct deposit",
+  "Bank transfer",
+  "Zelle",
+  "Venmo",
+  "Cash App",
+  "Other",
+] as const;
+export type PaymentMethod = (typeof PAYMENT_METHOD_OPTIONS)[number] | "";
+
+export function normalizePaymentMethod(raw: string): PaymentMethod | "" {
+  const s = (raw || "").trim();
+  if (!s) return "";
+  if (s === "Bank Transfer") return "Bank transfer";
+  for (const m of PAYMENT_METHOD_OPTIONS) {
+    if (m === s) return m;
+  }
+  return "Other";
+}
 export type TransactionType = "charge" | "payment" | "late_fee" | "adjustment";
 export type LoanTransactionType = "charge" | "payment" | "adjustment";
 export type DocumentType =
@@ -13,6 +34,7 @@ export type DocumentType =
   | "Lease"
   | "Loan Agreement"
   | "Receipt"
+  | "Payment Proof"
   | "Tax Document"
   | "Other"
   | "Template";
@@ -37,6 +59,8 @@ export interface Property {
   salePrice: number | null;
   buyerName: string;
   saleNotes: string;
+  nextReminderDate: string;
+  reminderNote: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -51,6 +75,7 @@ export interface PropertyTransaction {
   paymentAmount: number;
   paymentMethod: PaymentMethod | "";
   checkNumber: string;
+  referenceNumber: string;
   applyTo: ApplyTo;
   notes: string;
   createdAt: string;
@@ -69,6 +94,8 @@ export interface Loan {
   expectedMonthlyPayment: number;
   status: LoanStatus;
   notes: string;
+  nextReminderDate: string;
+  reminderNote: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,6 +110,7 @@ export interface LoanTransaction {
   paymentAmount: number;
   paymentMethod: PaymentMethod | "";
   checkNumber: string;
+  referenceNumber: string;
   notes: string;
   createdAt: string;
 }
@@ -112,6 +140,8 @@ export interface Document {
   originalFileName?: string | null;
   mimeType?: string | null;
   sizeBytes?: number | null;
+  propertyTransactionId?: string | null;
+  loanTransactionId?: string | null;
 }
 
 export interface ActivityItem {
@@ -135,7 +165,12 @@ const T = {
   NOTES: "barbara_notes",
   DOCUMENTS: "barbara_documents",
   ACTIVITIES: "barbara_activities",
+  SETTINGS: "barbara_settings",
 } as const;
+
+export const DEFAULT_LEDGER_PRODUCT_NAME = "EasyLedger";
+export const DEFAULT_LEDGER_SUBTITLE =
+  "Simple records for properties, loans, payments, and documents.";
 
 export const BARBARA_DOCUMENTS_BUCKET = "barbara-documents";
 
@@ -208,6 +243,8 @@ function mapProperty(row: Record<string, unknown>): Property {
     salePrice: sp === null || sp === undefined ? null : num(sp),
     buyerName: String(row.buyer_name ?? ""),
     saleNotes: String(row.sale_notes ?? ""),
+    nextReminderDate: dateStr(row.next_reminder_date),
+    reminderNote: String(row.reminder_note ?? ""),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
   };
@@ -222,8 +259,9 @@ function mapPropTxn(row: Record<string, unknown>): PropertyTransaction {
     description: String(row.description ?? ""),
     chargeAmount: num(row.charge_amount),
     paymentAmount: num(row.payment_amount),
-    paymentMethod: (row.payment_method || "") as PaymentMethod | "",
+    paymentMethod: normalizePaymentMethod(String(row.payment_method ?? "")),
     checkNumber: String(row.check_number ?? ""),
+    referenceNumber: String(row.reference_number ?? ""),
     applyTo: (row.apply_to || "Rent") as ApplyTo,
     notes: String(row.notes ?? ""),
     createdAt: String(row.created_at ?? ""),
@@ -244,6 +282,8 @@ function mapLoan(row: Record<string, unknown>): Loan {
     expectedMonthlyPayment: num(row.expected_monthly_payment),
     status: row.status as LoanStatus,
     notes: String(row.notes ?? ""),
+    nextReminderDate: dateStr(row.next_reminder_date),
+    reminderNote: String(row.reminder_note ?? ""),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
   };
@@ -258,8 +298,9 @@ function mapLoanTxn(row: Record<string, unknown>): LoanTransaction {
     description: String(row.description ?? ""),
     chargeAmount: num(row.charge_amount),
     paymentAmount: num(row.payment_amount),
-    paymentMethod: (row.payment_method || "") as PaymentMethod | "",
+    paymentMethod: normalizePaymentMethod(String(row.payment_method ?? "")),
     checkNumber: String(row.check_number ?? ""),
+    referenceNumber: String(row.reference_number ?? ""),
     notes: String(row.notes ?? ""),
     createdAt: String(row.created_at ?? ""),
   };
@@ -293,6 +334,10 @@ function mapDocument(row: Record<string, unknown>): Document {
     originalFileName: row.file_name != null ? String(row.file_name) : null,
     mimeType: row.mime_type != null ? String(row.mime_type) : null,
     sizeBytes: row.size_bytes != null ? Number(row.size_bytes) : null,
+    propertyTransactionId:
+      row.property_transaction_id != null ? String(row.property_transaction_id) : null,
+    loanTransactionId:
+      row.loan_transaction_id != null ? String(row.loan_transaction_id) : null,
   };
 }
 
@@ -353,6 +398,70 @@ async function addActivity(
   await trimActivities(userId);
 }
 
+// ============ LEDGER SETTINGS (barbara_settings) ============
+
+export async function getLedgerDisplayName(): Promise<string> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.SETTINGS)
+    .select("ledger_display_name")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return String(data?.ledger_display_name ?? "").trim();
+}
+
+export async function saveLedgerDisplayName(displayName: string): Promise<void> {
+  const user = await requireUser();
+  const trimmed = displayName.trim();
+  const { error } = await supabase.from(T.SETTINGS).upsert(
+    { user_id: user.id, ledger_display_name: trimmed },
+    { onConflict: "user_id" }
+  );
+  if (error) throw new Error(error.message);
+}
+
+export type ReminderListItem = {
+  date: string;
+  note: string;
+  entityType: "property" | "loan";
+  entityId: string;
+  entityLabel: string;
+};
+
+/** Reminders with a date on or after today (local date string). */
+export async function getUpcomingReminders(): Promise<ReminderListItem[]> {
+  const today = todayStr();
+  const [properties, loans] = await Promise.all([getProperties(), getLoans()]);
+  const items: ReminderListItem[] = [];
+  for (const p of properties) {
+    const d = p.nextReminderDate?.trim();
+    if (d && d >= today) {
+      items.push({
+        date: d,
+        note: p.reminderNote.trim(),
+        entityType: "property",
+        entityId: p.id,
+        entityLabel: p.propertyName,
+      });
+    }
+  }
+  for (const l of loans) {
+    const d = l.nextReminderDate?.trim();
+    if (d && d >= today) {
+      items.push({
+        date: d,
+        note: l.reminderNote.trim(),
+        entityType: "loan",
+        entityId: l.id,
+        entityLabel: `Loan to ${l.borrowerName}`,
+      });
+    }
+  }
+  items.sort((a, b) => a.date.localeCompare(b.date) || a.entityLabel.localeCompare(b.entityLabel));
+  return items;
+}
+
 // ============ PROPERTIES ============
 
 export async function getProperties(): Promise<Property[]> {
@@ -402,6 +511,8 @@ export async function addProperty(
     sale_price: data.salePrice,
     buyer_name: data.buyerName ?? "",
     sale_notes: data.saleNotes ?? "",
+    next_reminder_date: data.nextReminderDate || null,
+    reminder_note: data.reminderNote ?? "",
   };
   const { data: inserted, error } = await supabase.from(T.PROPERTIES).insert(row).select("*").single();
   if (error) throw new Error(error.message);
@@ -416,6 +527,7 @@ export async function addProperty(
       paymentAmount: 0,
       paymentMethod: "",
       checkNumber: "",
+      referenceNumber: "",
       applyTo: "Rent",
       notes: "",
     });
@@ -445,6 +557,8 @@ export async function updateProperty(id: string, data: Partial<Property>): Promi
   if (data.salePrice !== undefined) patch.sale_price = data.salePrice;
   if (data.buyerName !== undefined) patch.buyer_name = data.buyerName;
   if (data.saleNotes !== undefined) patch.sale_notes = data.saleNotes;
+  if (data.nextReminderDate !== undefined) patch.next_reminder_date = data.nextReminderDate || null;
+  if (data.reminderNote !== undefined) patch.reminder_note = data.reminderNote;
   const { error } = await supabase
     .from(T.PROPERTIES)
     .update(patch)
@@ -543,6 +657,7 @@ export async function addPropertyTransaction(
     payment_amount: data.paymentAmount,
     payment_method: data.paymentMethod,
     check_number: data.checkNumber,
+    reference_number: data.referenceNumber,
     apply_to: data.applyTo,
     notes: data.notes,
   };
@@ -623,6 +738,8 @@ export async function addLoan(data: Omit<Loan, "id" | "createdAt" | "updatedAt">
     expected_monthly_payment: data.expectedMonthlyPayment,
     status: data.status,
     notes: data.notes,
+    next_reminder_date: data.nextReminderDate || null,
+    reminder_note: data.reminderNote ?? "",
   };
   const { data: inserted, error } = await supabase.from(T.LOANS).insert(row).select("*").single();
   if (error) throw new Error(error.message);
@@ -637,6 +754,7 @@ export async function addLoan(data: Omit<Loan, "id" | "createdAt" | "updatedAt">
       paymentAmount: 0,
       paymentMethod: "",
       checkNumber: "",
+      referenceNumber: "",
       notes: "",
     });
   }
@@ -660,6 +778,8 @@ export async function updateLoan(id: string, data: Partial<Loan>): Promise<void>
     patch.expected_monthly_payment = data.expectedMonthlyPayment;
   if (data.status !== undefined) patch.status = data.status;
   if (data.notes !== undefined) patch.notes = data.notes;
+  if (data.nextReminderDate !== undefined) patch.next_reminder_date = data.nextReminderDate || null;
+  if (data.reminderNote !== undefined) patch.reminder_note = data.reminderNote;
   const { error } = await supabase.from(T.LOANS).update(patch).eq("user_id", user.id).eq("id", id);
   if (error) throw new Error(error.message);
 }
@@ -707,6 +827,7 @@ export async function addLoanTransaction(
     payment_amount: data.paymentAmount,
     payment_method: data.paymentMethod,
     check_number: data.checkNumber,
+    reference_number: data.referenceNumber,
     notes: data.notes,
   };
   const { data: inserted, error } = await supabase.from(T.LOAN_TXN).insert(row).select("*").single();
@@ -838,6 +959,8 @@ export async function addDocument(
     size_bytes: data.sizeBytes ?? null,
     template_body: data.relatedType === "template" ? data.fileUri || null : null,
     notes: data.notes,
+    property_transaction_id: data.propertyTransactionId ?? null,
+    loan_transaction_id: data.loanTransactionId ?? null,
   };
   if (data.id) row.id = data.id;
   const { data: inserted, error } = await supabase.from(T.DOCUMENTS).insert(row).select("*").single();
@@ -883,6 +1006,8 @@ export async function addDocumentWithFile(
     relatedType: Document["relatedType"];
     relatedId: string;
     notes: string;
+    propertyTransactionId?: string | null;
+    loanTransactionId?: string | null;
   }
 ): Promise<Document> {
   const user = await requireUser();
@@ -912,6 +1037,8 @@ export async function addDocumentWithFile(
     originalFileName: file.name,
     mimeType: mime,
     sizeBytes: file.size,
+    propertyTransactionId: meta.propertyTransactionId ?? null,
+    loanTransactionId: meta.loanTransactionId ?? null,
   });
 }
 
@@ -1088,6 +1215,7 @@ export async function generateLoanTaxReport(year: number): Promise<LoanTaxReport
 // ============ EXPORT / CLEAR ============
 
 export async function exportAllData(): Promise<string> {
+  const user = await requireUser();
   const [
     properties,
     propertyTransactions,
@@ -1105,9 +1233,12 @@ export async function exportAllData(): Promise<string> {
     getDocuments(),
     getActivities(1000),
   ]);
+  const settingsRes = await supabase.from(T.SETTINGS).select("*").eq("user_id", user.id).maybeSingle();
+  if (settingsRes.error) throw new Error(settingsRes.error.message);
   return JSON.stringify(
     {
       exportDate: new Date().toISOString(),
+      ledgerSettings: settingsRes.data ?? null,
       properties,
       propertyTransactions,
       loans,
@@ -1137,6 +1268,8 @@ export async function clearAllData(): Promise<void> {
     await supabase.storage.from(BARBARA_DOCUMENTS_BUCKET).remove(paths);
   }
 
+  const { error: e0 } = await supabase.from(T.SETTINGS).delete().eq("user_id", uid);
+  if (e0) throw new Error(e0.message);
   const { error: e1 } = await supabase.from(T.ACTIVITIES).delete().eq("user_id", uid);
   if (e1) throw new Error(e1.message);
   const { error: e2 } = await supabase.from(T.NOTES).delete().eq("user_id", uid);

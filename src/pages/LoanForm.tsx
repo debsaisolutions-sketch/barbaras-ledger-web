@@ -21,6 +21,8 @@ export default function LoanForm() {
     expectedMonthlyPayment: "",
     status: "Active" as LoanStatus,
     notes: "",
+    nextReminderDate: "",
+    reminderNote: "",
   });
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
@@ -45,6 +47,8 @@ export default function LoanForm() {
           expectedMonthlyPayment: l.expectedMonthlyPayment.toString(),
           status: l.status,
           notes: l.notes,
+          nextReminderDate: l.nextReminderDate,
+          reminderNote: l.reminderNote,
         });
       } catch (e) {
         if (!cancelled) alert((e as Error).message);
@@ -77,6 +81,8 @@ export default function LoanForm() {
       expectedMonthlyPayment: parseFloat(form.expectedMonthlyPayment) || 0,
       status: form.status,
       notes: form.notes.trim(),
+      nextReminderDate: form.nextReminderDate,
+      reminderNote: form.reminderNote.trim(),
     };
     try {
       setSaving(true);
@@ -182,6 +188,27 @@ export default function LoanForm() {
             <label>Payment Due Date</label>
             <input type="date" value={form.paymentDueDate} onChange={(e) => set("paymentDueDate", e.target.value)} />
           </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label>Next reminder date</label>
+              <input
+                type="date"
+                value={form.nextReminderDate}
+                onChange={(e) => set("nextReminderDate", e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label>Reminder note</label>
+              <input
+                value={form.reminderNote}
+                onChange={(e) => set("reminderNote", e.target.value)}
+                placeholder="e.g. Check account for payment"
+              />
+            </div>
+          </div>
+          <p style={{ color: "var(--muted)", fontSize: 14, marginTop: -8, marginBottom: 16 }}>
+            Optional. Shown on your dashboard when the date is today or later.
+          </p>
           <div className="form-group">
             <label>Notes</label>
             <textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} />

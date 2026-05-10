@@ -1,4 +1,4 @@
-import { useState, createContext, useContext, useCallback } from "react";
+import { useState, useEffect, createContext, useContext, useCallback } from "react";
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import Dashboard from "./pages/Dashboard";
@@ -19,6 +19,11 @@ import AddNote from "./pages/AddNote";
 import TemplateView from "./pages/TemplateView";
 import CustomTemplateView from "./pages/CustomTemplateView";
 import Login from "./pages/Login";
+import {
+  getLedgerDisplayName,
+  DEFAULT_LEDGER_PRODUCT_NAME,
+  DEFAULT_LEDGER_SUBTITLE,
+} from "./store";
 
 const RefreshCtx = createContext<{ key: number; refresh: () => void }>({
   key: 0,
@@ -34,6 +39,23 @@ function AppShell() {
   const [refreshKey, setRefreshKey] = useState(0);
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
   const closeSidebar = () => setSidebarOpen(false);
+  const [ledgerTitle, setLedgerTitle] = useState(DEFAULT_LEDGER_PRODUCT_NAME);
+
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const custom = await getLedgerDisplayName();
+        if (!cancelled) setLedgerTitle(custom || DEFAULT_LEDGER_PRODUCT_NAME);
+      } catch {
+        if (!cancelled) setLedgerTitle(DEFAULT_LEDGER_PRODUCT_NAME);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, refreshKey]);
 
   if (loading) {
     return (
@@ -61,8 +83,8 @@ function AppShell() {
         <div className={`overlay ${sidebarOpen ? "show" : ""}`} onClick={closeSidebar} />
         <nav className={`sidebar ${sidebarOpen ? "open" : ""}`}>
           <div className="sidebar-brand">
-            <h1>Barbara&apos;s Ledger</h1>
-            <p>Your Personal Record Book</p>
+            <h1>{ledgerTitle}</h1>
+            <p>{DEFAULT_LEDGER_SUBTITLE}</p>
           </div>
           <ul className="sidebar-nav">
             <li>
