@@ -1115,13 +1115,26 @@ export async function searchAll(query: string) {
       loans: [] as Loan[],
       notes: [] as Note[],
       documents: [] as Document[],
+      payments: [] as Array<{
+        id: string;
+        entityType: "property" | "loan";
+        entityId: string;
+        entityLabel: string;
+        date: string;
+        description: string;
+        amount: number;
+        checkNumber: string;
+        referenceNumber: string;
+      }>,
     };
-  const properties = (await getProperties()).filter((p) =>
+  const allProperties = await getProperties();
+  const properties = allProperties.filter((p) =>
     [p.propertyName, p.address, p.tenantName, p.tenantContact, p.notes].some((f) =>
       f?.toLowerCase().includes(q)
     )
   );
-  const loans = (await getLoans()).filter((l) =>
+  const allLoans = await getLoans();
+  const loans = allLoans.filter((l) =>
     [l.borrowerName, l.borrowerPhone, l.borrowerEmail, l.relationship, l.notes].some((f) =>
       f?.toLowerCase().includes(q)
     )
@@ -1130,7 +1143,41 @@ export async function searchAll(query: string) {
   const documents = (await getDocuments()).filter((d) =>
     [d.documentName, d.notes, d.documentType].some((f) => f?.toLowerCase().includes(q))
   );
-  return { properties, loans, notes, documents };
+  const [propTxns, loanTxns] = await Promise.all([getAllPropertyTransactions(), getAllLoanTransactions()]);
+  const propertyNameById = new Map(allProperties.map((p) => [p.id, p.propertyName]));
+  const loanNameById = new Map(allLoans.map((l) => [l.id, `Loan to ${l.borrowerName}`]));
+  const propPaymentHits = propTxns
+    .filter((t) =>
+      [t.description, t.checkNumber, t.referenceNumber].some((f) => f?.toLowerCase().includes(q))
+    )
+    .map((t) => ({
+      id: t.id,
+      entityType: "property" as const,
+      entityId: t.propertyId,
+      entityLabel: propertyNameById.get(t.propertyId) || "Property",
+      date: t.date,
+      description: t.description,
+      amount: t.paymentAmount > 0 ? t.paymentAmount : t.chargeAmount,
+      checkNumber: t.checkNumber,
+      referenceNumber: t.referenceNumber,
+    }));
+  const loanPaymentHits = loanTxns
+    .filter((t) =>
+      [t.description, t.checkNumber, t.referenceNumber].some((f) => f?.toLowerCase().includes(q))
+    )
+    .map((t) => ({
+      id: t.id,
+      entityType: "loan" as const,
+      entityId: t.loanId,
+      entityLabel: loanNameById.get(t.loanId) || "Loan",
+      date: t.date,
+      description: t.description,
+      amount: t.paymentAmount > 0 ? t.paymentAmount : t.chargeAmount,
+      checkNumber: t.checkNumber,
+      referenceNumber: t.referenceNumber,
+    }));
+  const payments = [...propPaymentHits, ...loanPaymentHits].sort((a, b) => b.date.localeCompare(a.date));
+  return { properties, loans, notes, documents, payments };
 }
 
 // ============ DASHBOARD STATS ============

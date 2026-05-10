@@ -10,6 +10,7 @@ import LoanDetail from "./pages/LoanDetail";
 import LoanForm from "./pages/LoanForm";
 import Documents from "./pages/Documents";
 import Reports from "./pages/Reports";
+import SearchPage from "./pages/Search";
 import Settings from "./pages/Settings";
 import AddRentalPayment from "./pages/AddRentalPayment";
 import AddLateFee from "./pages/AddLateFee";
@@ -108,6 +109,11 @@ function AppShell() {
               </NavLink>
             </li>
             <li>
+              <NavLink to="/search" onClick={closeSidebar}>
+                <span className="nav-icon">🔎</span> Search
+              </NavLink>
+            </li>
+            <li>
               <NavLink to="/reports" onClick={closeSidebar}>
                 <span className="nav-icon">📊</span> Tax Reports
               </NavLink>
@@ -151,6 +157,7 @@ function AppShell() {
             <Route path="/add-loan-payment" element={<AddLoanPayment />} />
             <Route path="/add-note" element={<AddNote mode="general" />} />
             <Route path="/documents" element={<Documents />} />
+            <Route path="/search" element={<SearchPage />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/template/:id" element={<TemplateView />} />
