@@ -41,6 +41,33 @@ export type DocumentType =
   | "Template";
 export type ApplyTo = "Rent" | "Late Fee" | "Other Charge";
 
+export const PROPERTY_EXPENSE_CATEGORIES = [
+  "Repair",
+  "Maintenance",
+  "Supplies",
+  "Utilities",
+  "Insurance",
+  "Property tax",
+  "Contractor",
+  "Other",
+] as const;
+export type PropertyExpenseCategory = (typeof PROPERTY_EXPENSE_CATEGORIES)[number];
+
+export interface PropertyExpense {
+  id: string;
+  propertyId: string;
+  expenseDate: string;
+  category: string;
+  description: string;
+  vendorName: string;
+  amount: number;
+  paymentMethod: string;
+  referenceNumber: string;
+  notes: string;
+  documentId: string | null;
+  createdAt: string;
+}
+
 export interface Property {
   id: string;
   propertyName: string;
@@ -165,6 +192,7 @@ export interface ActivityItem {
 const T = {
   PROPERTIES: "barbara_properties",
   PROP_TXN: "barbara_property_transactions",
+  PROPERTY_EXPENSES: "barbara_property_expenses",
   LOANS: "barbara_loans",
   LOAN_TXN: "barbara_loan_transactions",
   NOTES: "barbara_notes",
@@ -323,6 +351,23 @@ function mapNote(row: Record<string, unknown>): Note {
     noteDate: dateStr(row.note_date),
     noteText: String(row.note_text ?? ""),
     reminderDate: row.reminder_date ? dateStr(row.reminder_date) : "",
+    createdAt: String(row.created_at ?? ""),
+  };
+}
+
+function mapPropertyExpense(row: Record<string, unknown>): PropertyExpense {
+  return {
+    id: String(row.id),
+    propertyId: String(row.property_id),
+    expenseDate: dateStr(row.expense_date),
+    category: String(row.category ?? "Other"),
+    description: String(row.description ?? ""),
+    vendorName: String(row.vendor_name ?? ""),
+    amount: num(row.amount),
+    paymentMethod: String(row.payment_method ?? ""),
+    referenceNumber: String(row.reference_number ?? ""),
+    notes: String(row.notes ?? ""),
+    documentId: row.document_id != null ? String(row.document_id) : null,
     createdAt: String(row.created_at ?? ""),
   };
 }
@@ -716,6 +761,82 @@ export function getRunningBalanceTable(transactions: PropertyTransaction[]) {
     b += t.chargeAmount - t.paymentAmount;
     return { ...t, runningBalance: b };
   });
+}
+
+// ============ PROPERTY EXPENSES (repairs & receipts) ============
+
+export async function getPropertyExpenses(propertyId: string): Promise<PropertyExpense[]> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.PROPERTY_EXPENSES)
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("property_id", propertyId)
+    .order("expense_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => mapPropertyExpense(r as Record<string, unknown>));
+}
+
+export async function getAllPropertyExpenses(): Promise<PropertyExpense[]> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.PROPERTY_EXPENSES)
+    .select("*")
+    .eq("user_id", user.id)
+    .order("expense_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => mapPropertyExpense(r as Record<string, unknown>));
+}
+
+export async function addPropertyExpense(
+  propertyId: string,
+  data: {
+    expenseDate: string;
+    category: string;
+    description: string;
+    vendorName: string;
+    amount: number;
+    paymentMethod: string;
+    referenceNumber: string;
+    notes: string;
+  },
+  receiptFile?: File | null
+): Promise<PropertyExpense> {
+  const user = await requireUser();
+  let documentId: string | null = null;
+  if (receiptFile && receiptFile.size > 0) {
+    const shortDesc = data.description.trim() || "expense";
+    const doc = await addDocumentWithFile(receiptFile, {
+      documentName: `Receipt — ${shortDesc.slice(0, 80)}`,
+      documentType: "Receipt",
+      relatedType: "property",
+      relatedId: propertyId,
+      notes: data.notes.trim() ? `Expense receipt. ${data.notes.trim()}` : "Expense receipt.",
+    });
+    documentId = doc.id;
+  }
+  const row = {
+    user_id: user.id,
+    property_id: propertyId,
+    expense_date: data.expenseDate,
+    category: data.category.trim() || "Other",
+    description: data.description.trim(),
+    vendor_name: data.vendorName.trim(),
+    amount: data.amount,
+    payment_method: data.paymentMethod.trim(),
+    reference_number: data.referenceNumber.trim(),
+    notes: data.notes.trim(),
+    document_id: documentId,
+  };
+  const { data: inserted, error } = await supabase
+    .from(T.PROPERTY_EXPENSES)
+    .insert(row)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return mapPropertyExpense(inserted as Record<string, unknown>);
 }
 
 // ============ LOANS ============
@@ -1126,6 +1247,7 @@ export async function searchAll(query: string) {
         checkNumber: string;
         referenceNumber: string;
       }>,
+      propertyExpenses: [] as Array<PropertyExpense & { propertyLabel: string }>,
     };
   const allProperties = await getProperties();
   const properties = allProperties.filter((p) =>
@@ -1177,7 +1299,18 @@ export async function searchAll(query: string) {
       referenceNumber: t.referenceNumber,
     }));
   const payments = [...propPaymentHits, ...loanPaymentHits].sort((a, b) => b.date.localeCompare(a.date));
-  return { properties, loans, notes, documents, payments };
+  const allPropertyExpenses = await getAllPropertyExpenses();
+  const propertyExpenses = allPropertyExpenses
+    .filter((e) =>
+      [e.category, e.description, e.vendorName, e.referenceNumber, e.notes].some((f) =>
+        f?.toLowerCase().includes(q)
+      )
+    )
+    .map((e) => ({
+      ...e,
+      propertyLabel: propertyNameById.get(e.propertyId) || "Property",
+    }));
+  return { properties, loans, notes, documents, payments, propertyExpenses };
 }
 
 // ============ DASHBOARD STATS ============
@@ -1221,6 +1354,9 @@ export interface PropertyTaxReport {
   totalPayments: number;
   unpaidBalance: number;
   transactions: PropertyTransaction[];
+  /** Repairs & expenses with expense_date in the selected tax year (for your records only). */
+  expenses: PropertyExpense[];
+  totalExpenses: number;
 }
 export interface LoanTaxReport {
   loan: Loan;
@@ -1234,12 +1370,20 @@ export interface LoanTaxReport {
 export async function generatePropertyTaxReport(year: number): Promise<PropertyTaxReport[]> {
   const yearStr = year.toString();
   const properties = await getProperties();
-  const allTxns = await getAllPropertyTransactions();
+  const [allTxns, allExpenses] = await Promise.all([
+    getAllPropertyTransactions(),
+    getAllPropertyExpenses(),
+  ]);
   const reports: PropertyTaxReport[] = [];
   for (const property of properties) {
     const propTxns = allTxns.filter((t) => t.propertyId === property.id);
     const yearTxns = propTxns.filter((t) => t.date.startsWith(yearStr));
-    if (yearTxns.length === 0 && property.status === "Closed") continue;
+    const propExpenses = allExpenses.filter((e) => e.propertyId === property.id);
+    const yearExpenses = propExpenses
+      .filter((e) => e.expenseDate.startsWith(yearStr))
+      .sort((a, b) => b.expenseDate.localeCompare(a.expenseDate) || b.id.localeCompare(a.id));
+    const totalExpenses = yearExpenses.reduce((s, e) => s + e.amount, 0);
+    if (yearTxns.length === 0 && yearExpenses.length === 0 && property.status === "Closed") continue;
     const totalRentReceived = yearTxns
       .filter((t) => t.type === "payment" && t.applyTo === "Rent")
       .reduce((s, t) => s + t.paymentAmount, 0);
@@ -1260,6 +1404,8 @@ export async function generatePropertyTaxReport(year: number): Promise<PropertyT
       totalPayments,
       unpaidBalance: calculatePropertyBalance(propTxns),
       transactions: yearTxns,
+      expenses: yearExpenses,
+      totalExpenses,
     });
   }
   return reports;
@@ -1299,6 +1445,7 @@ export async function exportAllData(): Promise<string> {
   const [
     properties,
     propertyTransactions,
+    propertyExpenses,
     loans,
     loanTransactions,
     notes,
@@ -1307,6 +1454,7 @@ export async function exportAllData(): Promise<string> {
   ] = await Promise.all([
     getProperties(),
     getAllPropertyTransactions(),
+    getAllPropertyExpenses(),
     getLoans(),
     getAllLoanTransactions(),
     getAllNotes(),
@@ -1321,6 +1469,7 @@ export async function exportAllData(): Promise<string> {
       ledgerSettings: settingsRes.data ?? null,
       properties,
       propertyTransactions,
+      propertyExpenses,
       loans,
       loanTransactions,
       notes,
@@ -1356,6 +1505,8 @@ export async function clearAllData(): Promise<void> {
   if (e2) throw new Error(e2.message);
   const { error: e3 } = await supabase.from(T.PROP_TXN).delete().eq("user_id", uid);
   if (e3) throw new Error(e3.message);
+  const { error: e3b } = await supabase.from(T.PROPERTY_EXPENSES).delete().eq("user_id", uid);
+  if (e3b) throw new Error(e3b.message);
   const { error: e4 } = await supabase.from(T.LOAN_TXN).delete().eq("user_id", uid);
   if (e4) throw new Error(e4.message);
   const { error: e5 } = await supabase.from(T.DOCUMENTS).delete().eq("user_id", uid);

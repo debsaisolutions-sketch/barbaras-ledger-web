@@ -62,6 +62,7 @@ export default function Reports() {
   };
 
   const totalRentalIncome = propReports.reduce((s, r) => s + r.totalPayments, 0);
+  const totalPropertyExpenses = propReports.reduce((s, r) => s + r.totalExpenses, 0);
   const totalLoanPayments = loanReports.reduce((s, r) => s + r.totalPayments, 0);
   const outstandingBalances =
     propReports.reduce((s, r) => s + r.unpaidBalance, 0) +
@@ -122,19 +123,25 @@ export default function Reports() {
             <p style={{ color: "var(--muted)", lineHeight: 1.6 }}>
               {ledgerTitle} · Tax year {year} · Printed {fmtDate(new Date().toISOString())}
             </p>
+            <p style={{ color: "var(--muted)", lineHeight: 1.6, marginTop: 10 }}>
+              Figures below are for your records only. This app does not calculate taxes or give tax advice.
+            </p>
           </div>
           {/* Summary */}
           <div className="card" style={{ marginBottom: 24 }}>
             <h3 style={{ fontSize: 22, fontWeight: 700, marginBottom: 16 }}>Summary — {year}</h3>
             <div className="card-row">
               {propReports.length > 0 && (
-                <div className="card"><div className="stat-label">Total Rental Income</div><div className="stat-value green">{fmtCurrency(totalRentalIncome)}</div></div>
+                <div className="card"><div className="stat-label">Total Rental Income (payments)</div><div className="stat-value green">{fmtCurrency(totalRentalIncome)}</div></div>
+              )}
+              {propReports.length > 0 && (
+                <div className="card"><div className="stat-label">Total Repairs &amp; Expenses</div><div className="stat-value">{fmtCurrency(totalPropertyExpenses)}</div></div>
               )}
               {loanReports.length > 0 && (
                 <div className="card"><div className="stat-label">Total Loan Payments Received</div><div className="stat-value green">{fmtCurrency(totalLoanPayments)}</div></div>
               )}
               <div className="card"><div className="stat-label">Outstanding Balances</div><div className="stat-value orange">{fmtCurrency(outstandingBalances)}</div></div>
-              <div className="card"><div className="stat-label">Grand Total</div><div className="stat-value">{fmtCurrency(totalRentalIncome + totalLoanPayments)}</div></div>
+              <div className="card"><div className="stat-label">Total Payments Received (rent + loans)</div><div className="stat-value">{fmtCurrency(totalRentalIncome + totalLoanPayments)}</div></div>
             </div>
           </div>
 
@@ -163,6 +170,8 @@ export default function Reports() {
                     <div><span style={{ fontSize: 13, color: "var(--muted)" }}>Rent Received</span><div style={{ fontWeight: 700, color: "var(--success)" }}>{fmtCurrency(r.totalRentReceived)}</div></div>
                     <div><span style={{ fontSize: 13, color: "var(--muted)" }}>Late Fees</span><div style={{ fontWeight: 700 }}>{fmtCurrency(r.totalLateFees)}</div></div>
                     <div><span style={{ fontSize: 13, color: "var(--muted)" }}>Other</span><div style={{ fontWeight: 700 }}>{fmtCurrency(r.totalOtherCharges)}</div></div>
+                    <div><span style={{ fontSize: 13, color: "var(--muted)" }}>Total Income (payments)</span><div style={{ fontWeight: 700, color: "var(--success)" }}>{fmtCurrency(r.totalPayments)}</div></div>
+                    <div><span style={{ fontSize: 13, color: "var(--muted)" }}>Repairs &amp; Expenses ({year})</span><div style={{ fontWeight: 700 }}>{fmtCurrency(r.totalExpenses)}</div></div>
                     <div><span style={{ fontSize: 13, color: "var(--muted)" }}>Unpaid Balance</span><div style={{ fontWeight: 700, color: r.unpaidBalance > 0 ? "var(--error)" : "var(--success)" }}>{fmtCurrency(r.unpaidBalance)}</div></div>
                   </div>
                   {r.property.notes ? (
@@ -182,6 +191,40 @@ export default function Reports() {
                           </tr>
                         ))}</tbody>
                       </table>
+                    </div>
+                  )}
+                  <h4 style={{ marginTop: 16, marginBottom: 8 }}>Repairs &amp; Expenses — itemized ({year})</h4>
+                  {r.expenses.length === 0 ? (
+                    <p style={{ color: "var(--muted)", marginBottom: 0 }}>No repairs or expenses recorded for this year.</p>
+                  ) : (
+                    <div className="table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Category</th>
+                            <th>Description</th>
+                            <th>Vendor</th>
+                            <th>Amount</th>
+                            <th>Receipt</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {r.expenses.map((ex) => (
+                            <tr key={ex.id}>
+                              <td>{fmtDate(ex.expenseDate)}</td>
+                              <td>{ex.category}</td>
+                              <td>{ex.description || "—"}</td>
+                              <td>{ex.vendorName || "—"}</td>
+                              <td>{fmtCurrency(ex.amount)}</td>
+                              <td>{ex.documentId ? "Attached" : "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <p style={{ marginTop: 10, fontWeight: 700 }}>
+                        Total for this property: {fmtCurrency(r.totalExpenses)}
+                      </p>
                     </div>
                   )}
                 </div>

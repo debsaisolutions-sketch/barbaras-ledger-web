@@ -16,12 +16,20 @@ export default function SearchPage() {
     notes: [],
     documents: [],
     payments: [],
+    propertyExpenses: [],
   });
 
   const runSearch = async () => {
     const q = query.trim();
     if (!q) {
-      setResults({ properties: [], loans: [], notes: [], documents: [], payments: [] });
+      setResults({
+        properties: [],
+        loans: [],
+        notes: [],
+        documents: [],
+        payments: [],
+        propertyExpenses: [],
+      });
       return;
     }
     try {
@@ -49,7 +57,8 @@ export default function SearchPage() {
     results.loans.length +
     results.documents.length +
     results.notes.length +
-    results.payments.length;
+    results.payments.length +
+    results.propertyExpenses.length;
 
   return (
     <div>
@@ -190,6 +199,34 @@ export default function SearchPage() {
                     onClick={() => navigate(p.entityType === "property" ? `/properties/${p.entityId}` : `/loans/${p.entityId}`)}
                   >
                     {p.entityType === "property" ? "Open Property" : "Open Loan"}
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="card">
+            <h3 style={{ marginBottom: 10 }}>Repairs &amp; Expenses</h3>
+            {results.propertyExpenses.length === 0 ? (
+              <p style={{ color: "var(--muted)" }}>No expense matches for category, vendor, reference, or notes.</p>
+            ) : (
+              results.propertyExpenses.map((ex) => (
+                <div key={ex.id} className="list-item" style={{ cursor: "default" }}>
+                  <div className="item-content">
+                    <div className="item-title">
+                      {ex.propertyLabel} · {fmtCurrency(ex.amount)}
+                    </div>
+                    <div className="item-subtitle">
+                      {fmtDate(ex.expenseDate)} · {ex.category}
+                      {ex.description ? ` · ${ex.description}` : ""}
+                      {ex.vendorName ? ` · ${ex.vendorName}` : ""}
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    onClick={() => navigate(`/properties/${ex.propertyId}`)}
+                  >
+                    Open Property
                   </button>
                 </div>
               ))

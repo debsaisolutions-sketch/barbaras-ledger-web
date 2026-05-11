@@ -6,6 +6,8 @@ import {
   getRunningBalanceTable,
   getNotes,
   getDocuments,
+  getPropertyExpenses,
+  addPropertyExpense,
   addDocumentWithFile,
   getLedgerDisplayName,
   updateProperty,
@@ -13,8 +15,11 @@ import {
   markPropertyReminderDone,
   markPropertySold,
   deleteProperty,
+  PAYMENT_METHOD_OPTIONS,
+  PROPERTY_EXPENSE_CATEGORIES,
   type Property,
   type PropertyTransaction,
+  type PropertyExpense,
   type Note,
   type Document as Doc,
   type DocumentType,
@@ -31,6 +36,7 @@ export default function PropertyDetail() {
   const [txns, setTxns] = useState<(PropertyTransaction & { runningBalance: number })[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
+  const [expenses, setExpenses] = useState<PropertyExpense[]>([]);
   const [tab, setTab] = useState<"balance" | "notes" | "docs">("balance");
   const [loading, setLoading] = useState(true);
   const [showSoldModal, setShowSoldModal] = useState(false);
@@ -53,12 +59,26 @@ export default function PropertyDetail() {
     type: "Other" as DocumentType,
     notes: "",
   });
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [savingExpense, setSavingExpense] = useState(false);
+  const [expenseReceiptFile, setExpenseReceiptFile] = useState<File | null>(null);
+  const [expenseForm, setExpenseForm] = useState({
+    expenseDate: new Date().toISOString().split("T")[0],
+    category: "Other" as string,
+    description: "",
+    vendorName: "",
+    amount: "",
+    paymentMethod: "",
+    referenceNumber: "",
+    notes: "",
+  });
   const [ledgerTitle, setLedgerTitle] = useState("EasyLedger");
   const [reminderForm, setReminderForm] = useState({
     reminderDate: "",
     reminderNote: "",
   });
   const balance = txns.length > 0 ? txns[txns.length - 1].runningBalance : 0;
+  const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
 
   const canRecordPayments =
     property &&
@@ -76,16 +96,18 @@ export default function PropertyDetail() {
           if (!cancelled) setProperty(null);
           return;
         }
-        const [rawTxns, n, d] = await Promise.all([
+        const [rawTxns, n, d, ex] = await Promise.all([
           getPropertyTransactions(id),
           getNotes("property", id),
           getDocuments("property", id),
+          getPropertyExpenses(id),
         ]);
         if (cancelled) return;
         setProperty(p);
         setTxns(getRunningBalanceTable(rawTxns));
         setNotes(n);
         setDocs(d);
+        setExpenses(ex);
       } catch (e) {
         if (!cancelled) console.error(e);
       } finally {
@@ -224,6 +246,56 @@ export default function PropertyDetail() {
       alert("Reminder marked done.");
     } catch (err) {
       alert((err as Error).message || "Could not update reminder.");
+    }
+  };
+
+  const openExpenseModal = () => {
+    setExpenseForm({
+      expenseDate: new Date().toISOString().split("T")[0],
+      category: "Other",
+      description: "",
+      vendorName: "",
+      amount: "",
+      paymentMethod: "",
+      referenceNumber: "",
+      notes: "",
+    });
+    setExpenseReceiptFile(null);
+    setShowExpenseModal(true);
+  };
+
+  const saveExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!property || !id) return;
+    const amt = parseFloat(expenseForm.amount);
+    if (expenseForm.amount.trim() === "" || Number.isNaN(amt) || amt < 0) {
+      alert("Please enter a valid amount (0 or more).");
+      return;
+    }
+    try {
+      setSavingExpense(true);
+      await addPropertyExpense(
+        property.id,
+        {
+          expenseDate: expenseForm.expenseDate,
+          category: expenseForm.category,
+          description: expenseForm.description,
+          vendorName: expenseForm.vendorName,
+          amount: amt,
+          paymentMethod: expenseForm.paymentMethod,
+          referenceNumber: expenseForm.referenceNumber,
+          notes: expenseForm.notes,
+        },
+        expenseReceiptFile
+      );
+      setShowExpenseModal(false);
+      setExpenseReceiptFile(null);
+      refresh();
+      alert("Expense saved.");
+    } catch (err) {
+      alert((err as Error).message || "Could not save expense.");
+    } finally {
+      setSavingExpense(false);
     }
   };
 
@@ -500,6 +572,77 @@ export default function PropertyDetail() {
         )}
       </div>
 
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 12,
+            marginBottom: 12,
+          }}
+        >
+          <h3 style={{ margin: 0 }}>Repairs &amp; Expenses</h3>
+          <button type="button" className="btn btn-primary btn-lg" onClick={openExpenseModal}>
+            Add Expense / Receipt
+          </button>
+        </div>
+        <p style={{ color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
+          Track maintenance, repairs, and receipts for your records (for example, at tax time).
+        </p>
+        {expenses.length === 0 ? (
+          <p style={{ color: "var(--muted)" }}>No expenses recorded yet. Use Add Expense / Receipt to add one.</p>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Category</th>
+                  <th>Description</th>
+                  <th>Vendor</th>
+                  <th>Amount</th>
+                  <th>Receipt</th>
+                </tr>
+              </thead>
+              <tbody>
+                {expenses.map((ex) => {
+                  const receiptDoc = ex.documentId ? docs.find((d) => d.id === ex.documentId) : undefined;
+                  return (
+                    <tr key={ex.id}>
+                      <td>{fmtDate(ex.expenseDate)}</td>
+                      <td>{ex.category}</td>
+                      <td>{ex.description || "—"}</td>
+                      <td>{ex.vendorName || "—"}</td>
+                      <td>{fmtCurrency(ex.amount)}</td>
+                      <td>
+                        {receiptDoc?.storagePath ? (
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-sm"
+                            onClick={async () => {
+                              const ok = await openDocumentInNewTab(receiptDoc.storagePath!);
+                              if (!ok) alert("Could not open receipt. Try again.");
+                            }}
+                          >
+                            View receipt
+                          </button>
+                        ) : ex.documentId ? (
+                          <span style={{ color: "var(--muted)" }}>File…</span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {showDeleteModal && (
         <div
           className="modal-overlay"
@@ -513,8 +656,8 @@ export default function PropertyDetail() {
             <h3 style={{ fontSize: 24, marginBottom: 20 }}>Permanently Delete Property?</h3>
             <div style={{ fontSize: 18, lineHeight: 1.65, color: "var(--foreground)" }}>
               <p style={{ margin: "0 0 16px 0" }}>
-                Deleting this property will remove the property, payment history, notes, document records, and
-                it will no longer appear in tax reports.
+                Deleting this property will remove the property, payment history, repairs &amp; expenses, notes,
+                document records, and it will no longer appear in tax reports.
               </p>
               <p style={{ margin: "0 0 16px 0" }}>
                 Only delete after taxes are done and you no longer need these property records.
@@ -658,6 +801,120 @@ export default function PropertyDetail() {
         </div>
       )}
 
+      {showExpenseModal && (
+        <div className="modal-overlay" onClick={() => !savingExpense && setShowExpenseModal(false)}>
+          <div
+            className="modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: 520 }}
+          >
+            <h3>Add Expense / Receipt</h3>
+            <p style={{ color: "var(--muted)", marginBottom: 14, lineHeight: 1.5 }}>
+              Save a repair, bill, or other property cost. You can attach a receipt photo or PDF if you have one.
+            </p>
+            <form onSubmit={(e) => void saveExpense(e)}>
+              <div className="form-group">
+                <label>Date *</label>
+                <input
+                  type="date"
+                  value={expenseForm.expenseDate}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, expenseDate: e.target.value }))}
+                />
+              </div>
+              <div className="form-group">
+                <label>Category</label>
+                <select
+                  value={expenseForm.category}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, category: e.target.value }))}
+                >
+                  {PROPERTY_EXPENSE_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Description</label>
+                <textarea
+                  value={expenseForm.description}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, description: e.target.value }))}
+                  style={{ minHeight: 72 }}
+                />
+              </div>
+              <div className="form-group">
+                <label>Vendor / Paid To</label>
+                <input
+                  value={expenseForm.vendorName}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, vendorName: e.target.value }))}
+                />
+              </div>
+              <div className="form-group">
+                <label>Amount ($) *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={expenseForm.amount}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, amount: e.target.value }))}
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="form-group">
+                <label>Payment Method</label>
+                <select
+                  value={expenseForm.paymentMethod}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, paymentMethod: e.target.value }))}
+                >
+                  <option value="">—</option>
+                  {PAYMENT_METHOD_OPTIONS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Reference Number</label>
+                <input
+                  value={expenseForm.referenceNumber}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, referenceNumber: e.target.value }))}
+                />
+              </div>
+              <div className="form-group">
+                <label>Notes</label>
+                <textarea
+                  value={expenseForm.notes}
+                  onChange={(e) => setExpenseForm((f) => ({ ...f, notes: e.target.value }))}
+                  style={{ minHeight: 72 }}
+                />
+              </div>
+              <div className="form-group">
+                <label>Receipt (optional)</label>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.heic,.heif,.webp,image/*,application/pdf"
+                  onChange={(e) => setExpenseReceiptFile(e.target.files?.[0] ?? null)}
+                />
+              </div>
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-outline btn-lg"
+                  onClick={() => setShowExpenseModal(false)}
+                  disabled={savingExpense}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary btn-lg" disabled={savingExpense}>
+                  {savingExpense ? "Saving…" : "Save Expense"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showUploadModal && (
         <div className="modal-overlay" onClick={() => !savingUpload && setShowUploadModal(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -732,6 +989,10 @@ export default function PropertyDetail() {
           <div className="detail-info-item"><label>Due day</label><p>{property.rentDueDay || "—"}</p></div>
           <div className="detail-info-item"><label>Status</label><p>{property.status}</p></div>
           <div className="detail-info-item"><label>Current balance</label><p>{fmtCurrency(Math.max(0, balance))}</p></div>
+          <div className="detail-info-item">
+            <label>Total repairs &amp; expenses</label>
+            <p style={{ fontWeight: 700 }}>{fmtCurrency(expenseTotal)}</p>
+          </div>
         </div>
         {property.status === "Sold" && (
           <div style={{ marginTop: 10, fontSize: 15, lineHeight: 1.7 }}>
@@ -739,6 +1000,36 @@ export default function PropertyDetail() {
             <strong>Price:</strong> {property.salePrice != null ? fmtCurrency(property.salePrice) : "—"} ·{" "}
             <strong>Buyer:</strong> {property.buyerName || "—"}
             <div><strong>Sale notes:</strong> {property.saleNotes || "—"}</div>
+          </div>
+        )}
+        <h4 style={{ marginTop: 16, marginBottom: 8 }}>Repairs &amp; Expenses (itemized)</h4>
+        {expenses.length === 0 ? (
+          <p style={{ color: "var(--muted)" }}>No expenses recorded.</p>
+        ) : (
+          <div className="table-wrap" style={{ marginBottom: 16 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Category</th>
+                  <th>Description</th>
+                  <th>Vendor</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {expenses.map((ex) => (
+                  <tr key={`print-ex-${ex.id}`}>
+                    <td>{fmtDate(ex.expenseDate)}</td>
+                    <td>{ex.category}</td>
+                    <td>{ex.description || "—"}</td>
+                    <td>{ex.vendorName || "—"}</td>
+                    <td>{fmtCurrency(ex.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p style={{ marginTop: 8, fontWeight: 700 }}>Total: {fmtCurrency(expenseTotal)}</p>
           </div>
         )}
         <h4 style={{ marginTop: 16, marginBottom: 8 }}>Payment / Charge History</h4>
