@@ -93,6 +93,7 @@ export interface Property {
   propertyName: string;
   address: string;
   tenantName: string;
+  priorTenantName: string;
   tenantContact: string;
   tenantPhone: string;
   tenantEmail: string;
@@ -326,6 +327,7 @@ function mapProperty(row: Record<string, unknown>): Property {
     propertyName: String(row.property_name ?? ""),
     address: String(row.address ?? ""),
     tenantName: String(row.tenant_name ?? ""),
+    priorTenantName: String(row.prior_tenant_name ?? ""),
     tenantContact: String(row.tenant_contact ?? ""),
     tenantPhone: String(row.tenant_phone ?? ""),
     tenantEmail: String(row.tenant_email ?? ""),
@@ -669,6 +671,7 @@ export async function addProperty(
     property_name: data.propertyName,
     address: data.address,
     tenant_name: data.tenantName,
+    prior_tenant_name: data.priorTenantName ?? "",
     tenant_contact: data.tenantContact,
     tenant_phone: data.tenantPhone,
     tenant_email: data.tenantEmail,
@@ -715,6 +718,7 @@ export async function updateProperty(id: string, data: Partial<Property>): Promi
   if (data.propertyName !== undefined) patch.property_name = data.propertyName;
   if (data.address !== undefined) patch.address = data.address;
   if (data.tenantName !== undefined) patch.tenant_name = data.tenantName;
+  if (data.priorTenantName !== undefined) patch.prior_tenant_name = data.priorTenantName;
   if (data.tenantContact !== undefined) patch.tenant_contact = data.tenantContact;
   if (data.tenantPhone !== undefined) patch.tenant_phone = data.tenantPhone;
   if (data.tenantEmail !== undefined) patch.tenant_email = data.tenantEmail;
@@ -889,7 +893,12 @@ export async function addPropertyTransaction(
       entityType: "property",
       entityId: data.propertyId,
       entityName: property.propertyName,
-      personName: property.tenantName,
+      personName:
+        property.priorTenantName &&
+        property.leaseStartDate &&
+        data.date < property.leaseStartDate
+          ? property.priorTenantName
+          : property.tenantName,
       amount:
         data.type === "payment" ? data.paymentAmount : data.chargeAmount,
       description: data.description || data.type,

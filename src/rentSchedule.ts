@@ -355,6 +355,11 @@ export function summarizeVisiblePeriods(
   return visibleRentPeriods(schedule, payments, today).map((p) => summarizePeriod(p, payments, today));
 }
 
+/** A payment before the current lease start belongs to the previous tenant. */
+export function paidByPriorTenant(date: string, leaseStart: string, priorTenantName: string): boolean {
+  return Boolean(priorTenantName.trim() && leaseStart && date && date < leaseStart);
+}
+
 export function formatPeriodLabel(period: RentPeriod): string {
   return `${period.start} to ${period.end}`;
 }

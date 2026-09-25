@@ -28,12 +28,95 @@ import {
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
 import { useRefresh } from "../App";
 import { downloadDocumentFile, openDocumentInNewTab } from "../documentFiles";
-import { unpaidForDashboard } from "../rentSchedule";
+import { paidByPriorTenant, unpaidForDashboard } from "../rentSchedule";
 import RentPeriodList from "../components/RentPeriodList";
 import RepairsPanel from "../components/RepairsPanel";
 import RemindersPanel from "../components/RemindersPanel";
 import NotesList from "../components/NotesList";
 import ConfirmDialog from "../components/ConfirmDialog";
+
+function TxnTable({
+  rows,
+  property,
+  setTxnAction,
+  refresh,
+}: {
+  rows: (PropertyTransaction & { runningBalance: number })[];
+  property: Property;
+  setTxnAction: (action: { id: string; mode: "void" | "delete" } | null) => void;
+  refresh: () => void;
+}) {
+  if (rows.length === 0) {
+    return <p style={{ color: "var(--muted)" }}>None yet.</p>;
+  }
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Description</th>
+            <th>Charges</th>
+            <th>Payments</th>
+            <th>Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((t) => (
+            <tr key={t.id} style={t.voidedAt ? { opacity: 0.55 } : undefined}>
+              <td>{fmtDate(t.date)}</td>
+              <td>
+                {t.voidedAt ? "Voided · " : ""}
+                {t.description}
+                {t.paymentMethod ? ` (${t.paymentMethod})` : ""}
+                {t.checkNumber ? ` #${t.checkNumber}` : ""}
+                {t.referenceNumber ? ` · Ref: ${t.referenceNumber}` : ""}
+                {t.rentPeriodStart ? ` · Period ${fmtDate(t.rentPeriodStart)}` : ""}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                  {!t.voidedAt && (
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => setTxnAction({ id: t.id, mode: "void" })}>
+                      Void
+                    </button>
+                  )}
+                  <button type="button" className="btn btn-danger btn-sm" onClick={() => setTxnAction({ id: t.id, mode: "delete" })}>
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={() => {
+                      const text = window.prompt("Note about this payment or charge");
+                      if (!text?.trim()) return;
+                      void addNote({
+                        relatedType: t.type === "payment" ? "payment" : "property",
+                        relatedId: t.type === "payment" ? t.id : property.id,
+                        propertyId: property.id,
+                        noteDate: new Date().toISOString().split("T")[0],
+                        noteText: text.trim(),
+                        reminderDate: "",
+                      })
+                        .then(refresh)
+                        .catch((error) => alert((error as Error).message || "Could not save note."));
+                    }}
+                  >
+                    Add note
+                  </button>
+                </div>
+              </td>
+              <td style={{ color: t.chargeAmount > 0 ? "var(--error)" : "" }}>
+                {t.chargeAmount > 0 ? fmtCurrency(t.chargeAmount) : ""}
+              </td>
+              <td style={{ color: t.paymentAmount > 0 ? "var(--success)" : "" }}>
+                {t.paymentAmount > 0 ? fmtCurrency(t.paymentAmount) : ""}
+              </td>
+              <td style={{ fontWeight: 700 }}>{fmtCurrency(Math.max(0, t.runningBalance))}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -82,7 +165,9 @@ export default function PropertyDetail() {
           intervalDays: property.rentIntervalDays,
           leaseStart: property.leaseStartDate,
         },
-        transactions: txns.map((t) => ({
+        transactions: txns
+          .filter((t) => !property || !paidByPriorTenant(t.date, property.leaseStartDate, property.priorTenantName))
+          .map((t) => ({
           id: t.id,
           type: t.type,
           applyTo: t.applyTo,
@@ -97,6 +182,20 @@ export default function PropertyDetail() {
       })
     : 0;
   const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
+  const showPrior = Boolean(property?.priorTenantName && property.leaseStartDate);
+  const priorTxns =
+    showPrior && property
+      ? getRunningBalanceTable(
+          txns.filter((t) => paidByPriorTenant(t.date, property.leaseStartDate, property.priorTenantName))
+        )
+      : [];
+  const currentTxns =
+    showPrior && property
+      ? getRunningBalanceTable(
+          txns.filter((t) => !paidByPriorTenant(t.date, property.leaseStartDate, property.priorTenantName))
+        )
+      : txns;
+  const priorReceived = priorTxns.reduce((sum, t) => (t.voidedAt ? sum : sum + t.paymentAmount), 0);
 
   const canRecordPayments =
     property &&
@@ -353,6 +452,15 @@ export default function PropertyDetail() {
             <label>Tenant</label>
             <p>{property.tenantName || "—"}</p>
           </div>
+          {property.priorTenantName ? (
+            <div className="detail-info-item">
+              <label>Previous tenant</label>
+              <p>
+                {property.priorTenantName}
+                {property.leaseStartDate ? `, before ${fmtDate(property.leaseStartDate)}` : ""}
+              </p>
+            </div>
+          ) : null}
           <div className="detail-info-item">
             <label>Phone</label>
             <p>{property.tenantPhone || "—"}</p>
@@ -503,7 +611,7 @@ export default function PropertyDetail() {
         )}
       </div>
 
-      <RentPeriodList property={property} transactions={txns} />
+      <RentPeriodList property={property} transactions={currentTxns} />
 
       <RemindersPanel
         property={property}
@@ -892,70 +1000,24 @@ export default function PropertyDetail() {
             <p>No transactions yet.</p>
           </div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Description</th>
-                  <th>Charges</th>
-                  <th>Payments</th>
-                  <th>Balance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {txns.map((t) => (
-                  <tr key={t.id} style={t.voidedAt ? { opacity: 0.55 } : undefined}>
-                    <td>{fmtDate(t.date)}</td>
-                    <td>
-                      {t.voidedAt ? "Voided · " : ""}
-                      {t.description}
-                      {t.paymentMethod ? ` (${t.paymentMethod})` : ""}
-                      {t.checkNumber ? ` #${t.checkNumber}` : ""}
-                      {t.referenceNumber ? ` · Ref: ${t.referenceNumber}` : ""}
-                      {t.rentPeriodStart ? ` · Period ${fmtDate(t.rentPeriodStart)}` : ""}
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                        {!t.voidedAt && (
-                          <button type="button" className="btn btn-outline btn-sm" onClick={() => setTxnAction({ id: t.id, mode: "void" })}>
-                            Void
-                          </button>
-                        )}
-                        <button type="button" className="btn btn-danger btn-sm" onClick={() => setTxnAction({ id: t.id, mode: "delete" })}>
-                          Delete
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-outline btn-sm"
-                          onClick={() => {
-                            const text = window.prompt("Note about this payment or charge");
-                            if (!text?.trim() || !property) return;
-                            void addNote({
-                              relatedType: t.type === "payment" ? "payment" : "property",
-                              relatedId: t.type === "payment" ? t.id : property.id,
-                              propertyId: property.id,
-                              noteDate: new Date().toISOString().split("T")[0],
-                              noteText: text.trim(),
-                              reminderDate: "",
-                            })
-                              .then(refresh)
-                              .catch((error) => alert((error as Error).message || "Could not save note."));
-                          }}
-                        >
-                          Add note
-                        </button>
-                      </div>
-                    </td>
-                    <td style={{ color: t.chargeAmount > 0 ? "var(--error)" : "" }}>
-                      {t.chargeAmount > 0 ? fmtCurrency(t.chargeAmount) : ""}
-                    </td>
-                    <td style={{ color: t.paymentAmount > 0 ? "var(--success)" : "" }}>
-                      {t.paymentAmount > 0 ? fmtCurrency(t.paymentAmount) : ""}
-                    </td>
-                    <td style={{ fontWeight: 700 }}>{fmtCurrency(Math.max(0, t.runningBalance))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div>
+            {showPrior && property && (
+              <div style={{ marginBottom: 28 }}>
+                <h3 style={{ marginBottom: 6 }}>
+                  {property.priorTenantName}, before {fmtDate(property.leaseStartDate)}
+                </h3>
+                <p style={{ marginTop: 0, color: "var(--muted)" }}>
+                  Received {fmtCurrency(priorReceived)}. These payments are not counted for {property.tenantName || "the current tenant"}.
+                </p>
+                <TxnTable rows={priorTxns} property={property} setTxnAction={setTxnAction} refresh={refresh} />
+              </div>
+            )}
+            {showPrior && property && (
+              <h3 style={{ marginBottom: 12 }}>
+                {property.tenantName || "Current tenant"}, since {fmtDate(property.leaseStartDate)}
+              </h3>
+            )}
+            <TxnTable rows={currentTxns} property={property} setTxnAction={setTxnAction} refresh={refresh} />
           </div>
         ))}
 

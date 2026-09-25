@@ -18,6 +18,7 @@ export default function PropertyForm() {
     propertyName: "",
     address: "",
     tenantName: "",
+    priorTenantName: "",
     tenantContact: "",
     tenantPhone: "",
     tenantEmail: "",
@@ -63,6 +64,7 @@ export default function PropertyForm() {
           propertyName: p.propertyName,
           address: p.address,
           tenantName: p.tenantName,
+          priorTenantName: p.priorTenantName,
           tenantContact: p.tenantContact,
           tenantPhone: p.tenantPhone,
           tenantEmail: p.tenantEmail,
@@ -134,6 +136,7 @@ export default function PropertyForm() {
       propertyName: form.propertyName.trim(),
       address: form.address.trim(),
       tenantName: form.tenantName.trim(),
+      priorTenantName: form.priorTenantName.trim(),
       tenantContact: form.tenantContact.trim(),
       tenantPhone: form.tenantPhone.trim(),
       tenantEmail: form.tenantEmail.trim(),
@@ -226,6 +229,17 @@ export default function PropertyForm() {
             <div className="form-group">
               <label>Tenant Name</label>
               <input value={form.tenantName} onChange={(e) => set("tenantName", e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>Previous tenant</label>
+              <input
+                value={form.priorTenantName}
+                onChange={(e) => set("priorTenantName", e.target.value)}
+                placeholder="Who lived here before the current lease"
+              />
+              <p style={{ color: "var(--muted)", fontSize: 14, marginTop: 8 }}>
+                Payments dated before the lease start stay with this person.
+              </p>
             </div>
             <div className="form-group">
               <label>Tenant Phone</label>

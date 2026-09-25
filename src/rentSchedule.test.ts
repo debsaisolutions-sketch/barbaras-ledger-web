@@ -15,6 +15,7 @@ import {
   repairSaveError,
   summarizePeriod,
   summarizeVisiblePeriods,
+  paidByPriorTenant,
   unpaidForDashboard,
   type RentPaymentInput,
   type RentScheduleInput,
@@ -256,6 +257,8 @@ describe("existing ledger records", () => {
     expect(current?.status).toBe("Partial");
     const upcoming = periods.find((p) => p.start === "2026-10-07");
     expect(upcoming?.status).toBe("Upcoming");
+    expect(paidByPriorTenant("2026-06-13", "2026-09-11", "Connie Williams")).toBe(true);
+    expect(paidByPriorTenant("2026-09-24", "2026-09-11", "Connie Williams")).toBe(false);
     expect(
       unpaidForDashboard({
         schedule,
