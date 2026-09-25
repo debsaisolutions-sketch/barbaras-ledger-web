@@ -2,6 +2,17 @@
 
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
+import {
+  normalizeLoanPaidOff,
+  normalizeRentFrequency,
+  normalizeRepairPriority,
+  normalizeRepairStatus,
+  optionalMoney,
+  unpaidForDashboard,
+  type RentFrequency,
+  type RepairPriority,
+  type RepairStatus,
+} from "./rentSchedule";
 
 export type PropertyStatus = "Active" | "Vacant" | "Past Due" | "Closed" | "Sold";
 export type LoanStatus = "Active" | "Paid Off" | "Past Due" | "Written Off";
@@ -58,9 +69,17 @@ export interface PropertyExpense {
   propertyId: string;
   expenseDate: string;
   category: string;
+  /** What needs to be done. Older rows may only have description. */
+  title: string;
   description: string;
   vendorName: string;
+  /** Actual money spent. 0 means no cost has been recorded. */
   amount: number;
+  estimatedCost: number | null;
+  priority: RepairPriority;
+  workStatus: RepairStatus;
+  targetDate: string;
+  completedDate: string;
   paymentMethod: string;
   referenceNumber: string;
   notes: string;
@@ -91,6 +110,20 @@ export interface Property {
   reminderNote: string;
   reminderCompleted: boolean;
   reminderCompletedAt: string;
+  reminderDismissed: boolean;
+  /** Expected amount per period. Column remains monthly_rent. */
+  rentFrequency: RentFrequency;
+  rentAnchorDate: string;
+  rentIntervalDays: number | null;
+  loanPaidOff: boolean;
+  lender: string;
+  originalLoanAmount: number | null;
+  remainingLoanBalance: number | null;
+  loanPaymentAmount: number | null;
+  loanPaymentFrequency: string;
+  loanPaymentDue: string;
+  loanInterestRate: number | null;
+  loanNotes: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -108,6 +141,10 @@ export interface PropertyTransaction {
   referenceNumber: string;
   applyTo: ApplyTo;
   notes: string;
+  rentPeriodStart: string;
+  rentPeriodEnd: string;
+  voidedAt: string;
+  voidReason: string;
   createdAt: string;
 }
 
@@ -128,6 +165,7 @@ export interface Loan {
   reminderNote: string;
   reminderCompleted: boolean;
   reminderCompletedAt: string;
+  reminderDismissed: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -144,17 +182,41 @@ export interface LoanTransaction {
   checkNumber: string;
   referenceNumber: string;
   notes: string;
+  voidedAt: string;
+  voidReason: string;
   createdAt: string;
 }
 
+export type NoteRelatedType = "property" | "loan" | "general" | "payment" | "repair" | "tenant";
+
 export interface Note {
   id: string;
-  relatedType: "property" | "loan" | "general";
+  relatedType: NoteRelatedType;
   relatedId: string;
+  propertyId: string | null;
+  loanId: string | null;
   noteDate: string;
   noteText: string;
   reminderDate: string;
   createdAt: string;
+}
+
+export type ReminderRelatedType = "property" | "loan" | "payment" | "repair" | "general" | "tenant";
+export type ReminderStatus = "open" | "completed" | "dismissed";
+
+export interface Reminder {
+  id: string;
+  dueDate: string;
+  note: string;
+  relatedType: ReminderRelatedType;
+  relatedId: string;
+  propertyId: string | null;
+  loanId: string | null;
+  status: ReminderStatus;
+  completedAt: string;
+  dismissedAt: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Document {
@@ -196,6 +258,7 @@ const T = {
   LOANS: "barbara_loans",
   LOAN_TXN: "barbara_loan_transactions",
   NOTES: "barbara_notes",
+  REMINDERS: "barbara_reminders",
   DOCUMENTS: "barbara_documents",
   ACTIVITIES: "barbara_activities",
   SETTINGS: "barbara_settings",
@@ -280,6 +343,22 @@ function mapProperty(row: Record<string, unknown>): Property {
     reminderNote: String(row.reminder_note ?? ""),
     reminderCompleted: Boolean(row.reminder_completed),
     reminderCompletedAt: String(row.reminder_completed_at ?? ""),
+    reminderDismissed: Boolean(row.reminder_dismissed),
+    rentFrequency: normalizeRentFrequency(row.rent_frequency),
+    rentAnchorDate: dateStr(row.rent_anchor_date),
+    rentIntervalDays:
+      row.rent_interval_days === null || row.rent_interval_days === undefined
+        ? null
+        : Math.round(num(row.rent_interval_days)) || null,
+    loanPaidOff: normalizeLoanPaidOff(row.loan_paid_off),
+    lender: String(row.lender ?? ""),
+    originalLoanAmount: optionalMoney(row.original_loan_amount),
+    remainingLoanBalance: optionalMoney(row.remaining_loan_balance),
+    loanPaymentAmount: optionalMoney(row.loan_payment_amount),
+    loanPaymentFrequency: String(row.loan_payment_frequency ?? ""),
+    loanPaymentDue: String(row.loan_payment_due ?? ""),
+    loanInterestRate: optionalMoney(row.loan_interest_rate),
+    loanNotes: String(row.loan_notes ?? ""),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
   };
@@ -299,6 +378,10 @@ function mapPropTxn(row: Record<string, unknown>): PropertyTransaction {
     referenceNumber: String(row.reference_number ?? ""),
     applyTo: (row.apply_to || "Rent") as ApplyTo,
     notes: String(row.notes ?? ""),
+    rentPeriodStart: dateStr(row.rent_period_start),
+    rentPeriodEnd: dateStr(row.rent_period_end),
+    voidedAt: row.voided_at ? String(row.voided_at) : "",
+    voidReason: String(row.void_reason ?? ""),
     createdAt: String(row.created_at ?? ""),
   };
 }
@@ -321,6 +404,7 @@ function mapLoan(row: Record<string, unknown>): Loan {
     reminderNote: String(row.reminder_note ?? ""),
     reminderCompleted: Boolean(row.reminder_completed),
     reminderCompletedAt: String(row.reminder_completed_at ?? ""),
+    reminderDismissed: Boolean(row.reminder_dismissed),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
   };
@@ -339,6 +423,8 @@ function mapLoanTxn(row: Record<string, unknown>): LoanTransaction {
     checkNumber: String(row.check_number ?? ""),
     referenceNumber: String(row.reference_number ?? ""),
     notes: String(row.notes ?? ""),
+    voidedAt: row.voided_at ? String(row.voided_at) : "",
+    voidReason: String(row.void_reason ?? ""),
     createdAt: String(row.created_at ?? ""),
   };
 }
@@ -348,6 +434,8 @@ function mapNote(row: Record<string, unknown>): Note {
     id: String(row.id),
     relatedType: row.related_type as Note["relatedType"],
     relatedId: String(row.related_id ?? ""),
+    propertyId: row.property_id != null ? String(row.property_id) : null,
+    loanId: row.loan_id != null ? String(row.loan_id) : null,
     noteDate: dateStr(row.note_date),
     noteText: String(row.note_text ?? ""),
     reminderDate: row.reminder_date ? dateStr(row.reminder_date) : "",
@@ -361,9 +449,15 @@ function mapPropertyExpense(row: Record<string, unknown>): PropertyExpense {
     propertyId: String(row.property_id),
     expenseDate: dateStr(row.expense_date),
     category: String(row.category ?? "Other"),
+    title: String(row.title ?? ""),
     description: String(row.description ?? ""),
     vendorName: String(row.vendor_name ?? ""),
     amount: num(row.amount),
+    estimatedCost: optionalMoney(row.estimated_cost),
+    priority: normalizeRepairPriority(row.priority),
+    workStatus: normalizeRepairStatus(row.work_status),
+    targetDate: dateStr(row.target_date),
+    completedDate: dateStr(row.completed_date),
     paymentMethod: String(row.payment_method ?? ""),
     referenceNumber: String(row.reference_number ?? ""),
     notes: String(row.notes ?? ""),
@@ -476,22 +570,27 @@ export async function saveLedgerDisplayName(displayName: string): Promise<void> 
 }
 
 export type ReminderListItem = {
+  id: string;
+  source: "legacy-property" | "legacy-loan" | "reminder";
   date: string;
   note: string;
-  entityType: "property" | "loan";
+  entityType: ReminderRelatedType;
   entityId: string;
   entityLabel: string;
 };
 
-/** Reminders with a date on or after today (local date string). */
+/** Open reminders, including ones whose date has already passed. */
 export async function getUpcomingReminders(): Promise<ReminderListItem[]> {
-  const today = todayStr();
-  const [properties, loans] = await Promise.all([getProperties(), getLoans()]);
+  const [properties, loans, reminders] = await Promise.all([getProperties(), getLoans(), getReminders()]);
+  const propertyName = new Map(properties.map((p) => [p.id, p.propertyName]));
+  const loanName = new Map(loans.map((l) => [l.id, `Loan to ${l.borrowerName}`]));
   const items: ReminderListItem[] = [];
   for (const p of properties) {
     const d = p.nextReminderDate?.trim();
-    if (d && d >= today && !p.reminderCompleted) {
+    if (d && !p.reminderCompleted && !p.reminderDismissed) {
       items.push({
+        id: `legacy-property:${p.id}`,
+        source: "legacy-property",
         date: d,
         note: p.reminderNote.trim(),
         entityType: "property",
@@ -502,8 +601,10 @@ export async function getUpcomingReminders(): Promise<ReminderListItem[]> {
   }
   for (const l of loans) {
     const d = l.nextReminderDate?.trim();
-    if (d && d >= today && !l.reminderCompleted) {
+    if (d && !l.reminderCompleted && !l.reminderDismissed) {
       items.push({
+        id: `legacy-loan:${l.id}`,
+        source: "legacy-loan",
         date: d,
         note: l.reminderNote.trim(),
         entityType: "loan",
@@ -511,6 +612,22 @@ export async function getUpcomingReminders(): Promise<ReminderListItem[]> {
         entityLabel: `Loan to ${l.borrowerName}`,
       });
     }
+  }
+  for (const r of reminders) {
+    if (r.status !== "open") continue;
+    let label = "Reminder";
+    if (r.propertyId && propertyName.has(r.propertyId)) label = propertyName.get(r.propertyId) || label;
+    else if (r.loanId && loanName.has(r.loanId)) label = loanName.get(r.loanId) || label;
+    else if (r.relatedType === "general") label = "General";
+    items.push({
+      id: r.id,
+      source: "reminder",
+      date: r.dueDate,
+      note: r.note,
+      entityType: r.propertyId ? "property" : r.loanId ? "loan" : r.relatedType,
+      entityId: r.propertyId || r.loanId || r.relatedId,
+      entityLabel: label,
+    });
   }
   items.sort((a, b) => a.date.localeCompare(b.date) || a.entityLabel.localeCompare(b.entityLabel));
   return items;
@@ -569,25 +686,23 @@ export async function addProperty(
     reminder_note: data.reminderNote ?? "",
     reminder_completed: Boolean(data.reminderCompleted),
     reminder_completed_at: data.reminderCompletedAt || null,
+    reminder_dismissed: Boolean(data.reminderDismissed),
+    rent_frequency: data.rentFrequency || "monthly",
+    rent_anchor_date: data.rentAnchorDate || null,
+    rent_interval_days: data.rentIntervalDays,
+    loan_paid_off: data.loanPaidOff !== false,
+    lender: data.lender ?? "",
+    original_loan_amount: data.originalLoanAmount,
+    remaining_loan_balance: data.remainingLoanBalance,
+    loan_payment_amount: data.loanPaymentAmount,
+    loan_payment_frequency: data.loanPaymentFrequency ?? "",
+    loan_payment_due: data.loanPaymentDue ?? "",
+    loan_interest_rate: data.loanInterestRate,
+    loan_notes: data.loanNotes ?? "",
   };
   const { data: inserted, error } = await supabase.from(T.PROPERTIES).insert(row).select("*").single();
   if (error) throw new Error(error.message);
   const p = mapProperty(inserted as Record<string, unknown>);
-  if (data.monthlyRent > 0) {
-    await addPropertyTransaction({
-      propertyId: p.id,
-      date: todayStr(),
-      type: "charge",
-      description: "Initial monthly rent charge",
-      chargeAmount: data.monthlyRent,
-      paymentAmount: 0,
-      paymentMethod: "",
-      checkNumber: "",
-      referenceNumber: "",
-      applyTo: "Rent",
-      notes: "",
-    });
-  }
   const fresh = await getProperty(p.id);
   if (!fresh) throw new Error("Property was created but could not be loaded.");
   return fresh;
@@ -618,6 +733,19 @@ export async function updateProperty(id: string, data: Partial<Property>): Promi
   if (data.reminderCompleted !== undefined) patch.reminder_completed = data.reminderCompleted;
   if (data.reminderCompletedAt !== undefined)
     patch.reminder_completed_at = data.reminderCompletedAt || null;
+  if (data.reminderDismissed !== undefined) patch.reminder_dismissed = data.reminderDismissed;
+  if (data.rentFrequency !== undefined) patch.rent_frequency = data.rentFrequency;
+  if (data.rentAnchorDate !== undefined) patch.rent_anchor_date = data.rentAnchorDate || null;
+  if (data.rentIntervalDays !== undefined) patch.rent_interval_days = data.rentIntervalDays;
+  if (data.loanPaidOff !== undefined) patch.loan_paid_off = data.loanPaidOff;
+  if (data.lender !== undefined) patch.lender = data.lender;
+  if (data.originalLoanAmount !== undefined) patch.original_loan_amount = data.originalLoanAmount;
+  if (data.remainingLoanBalance !== undefined) patch.remaining_loan_balance = data.remainingLoanBalance;
+  if (data.loanPaymentAmount !== undefined) patch.loan_payment_amount = data.loanPaymentAmount;
+  if (data.loanPaymentFrequency !== undefined) patch.loan_payment_frequency = data.loanPaymentFrequency;
+  if (data.loanPaymentDue !== undefined) patch.loan_payment_due = data.loanPaymentDue;
+  if (data.loanInterestRate !== undefined) patch.loan_interest_rate = data.loanInterestRate;
+  if (data.loanNotes !== undefined) patch.loan_notes = data.loanNotes;
   const { error } = await supabase
     .from(T.PROPERTIES)
     .update(patch)
@@ -634,6 +762,21 @@ export async function markPropertyReminderDone(id: string): Promise<void> {
   await updateProperty(id, {
     reminderCompleted: true,
     reminderCompletedAt: new Date().toISOString(),
+    reminderDismissed: false,
+  });
+}
+
+export async function dismissPropertyReminder(id: string): Promise<void> {
+  await updateProperty(id, { reminderDismissed: true });
+}
+
+export async function clearPropertyReminder(id: string): Promise<void> {
+  await updateProperty(id, {
+    nextReminderDate: "",
+    reminderNote: "",
+    reminderCompleted: false,
+    reminderCompletedAt: "",
+    reminderDismissed: false,
   });
 }
 
@@ -710,7 +853,10 @@ export async function getAllPropertyTransactions(): Promise<PropertyTransaction[
 }
 
 export async function addPropertyTransaction(
-  data: Omit<PropertyTransaction, "id" | "createdAt">
+  data: Omit<PropertyTransaction, "id" | "createdAt" | "voidedAt" | "voidReason" | "rentPeriodStart" | "rentPeriodEnd"> & {
+    rentPeriodStart?: string;
+    rentPeriodEnd?: string;
+  }
 ): Promise<PropertyTransaction> {
   const user = await requireUser();
   const row = {
@@ -726,6 +872,8 @@ export async function addPropertyTransaction(
     reference_number: data.referenceNumber,
     apply_to: data.applyTo,
     notes: data.notes,
+    rent_period_start: data.rentPeriodStart || null,
+    rent_period_end: data.rentPeriodEnd || null,
   };
   const { data: inserted, error } = await supabase.from(T.PROP_TXN).insert(row).select("*").single();
   if (error) throw new Error(error.message);
@@ -751,16 +899,35 @@ export async function addPropertyTransaction(
 
 export function calculatePropertyBalance(transactions: PropertyTransaction[]): number {
   let b = 0;
-  for (const t of transactions) b += t.chargeAmount - t.paymentAmount;
+  for (const t of transactions) {
+    if (t.voidedAt) continue;
+    b += t.chargeAmount - t.paymentAmount;
+  }
   return Math.max(0, b);
 }
 
 export function getRunningBalanceTable(transactions: PropertyTransaction[]) {
   let b = 0;
   return transactions.map((t) => {
-    b += t.chargeAmount - t.paymentAmount;
+    if (!t.voidedAt) b += t.chargeAmount - t.paymentAmount;
     return { ...t, runningBalance: b };
   });
+}
+
+export async function voidPropertyTransaction(id: string, reason = ""): Promise<void> {
+  const user = await requireUser();
+  const { error } = await supabase
+    .from(T.PROP_TXN)
+    .update({ voided_at: new Date().toISOString(), void_reason: reason.trim() })
+    .eq("user_id", user.id)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deletePropertyTransaction(id: string): Promise<void> {
+  const user = await requireUser();
+  const { error } = await supabase.from(T.PROP_TXN).delete().eq("user_id", user.id).eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 // ============ PROPERTY EXPENSES (repairs & receipts) ============
@@ -790,18 +957,26 @@ export async function getAllPropertyExpenses(): Promise<PropertyExpense[]> {
   return (data ?? []).map((r) => mapPropertyExpense(r as Record<string, unknown>));
 }
 
+export interface PropertyExpenseInput {
+  expenseDate: string;
+  category: string;
+  title?: string;
+  description: string;
+  vendorName: string;
+  amount: number;
+  estimatedCost?: number | null;
+  priority?: RepairPriority;
+  workStatus?: RepairStatus;
+  targetDate?: string;
+  completedDate?: string;
+  paymentMethod: string;
+  referenceNumber: string;
+  notes: string;
+}
+
 export async function addPropertyExpense(
   propertyId: string,
-  data: {
-    expenseDate: string;
-    category: string;
-    description: string;
-    vendorName: string;
-    amount: number;
-    paymentMethod: string;
-    referenceNumber: string;
-    notes: string;
-  },
+  data: PropertyExpenseInput,
   receiptFile?: File | null
 ): Promise<PropertyExpense> {
   const user = await requireUser();
@@ -821,10 +996,16 @@ export async function addPropertyExpense(
     user_id: user.id,
     property_id: propertyId,
     expense_date: data.expenseDate,
-    category: data.category.trim() || "Other",
+    category: data.category.trim() || "Repair",
+    title: (data.title ?? "").trim(),
     description: data.description.trim(),
     vendor_name: data.vendorName.trim(),
     amount: data.amount,
+    estimated_cost: data.estimatedCost ?? null,
+    priority: data.priority || "Normal",
+    work_status: data.workStatus || "Needs Attention",
+    target_date: data.targetDate || null,
+    completed_date: data.completedDate || null,
     payment_method: data.paymentMethod.trim(),
     reference_number: data.referenceNumber.trim(),
     notes: data.notes.trim(),
@@ -837,6 +1018,37 @@ export async function addPropertyExpense(
     .single();
   if (error) throw new Error(error.message);
   return mapPropertyExpense(inserted as Record<string, unknown>);
+}
+
+export async function updatePropertyExpense(id: string, data: PropertyExpenseInput): Promise<void> {
+  const user = await requireUser();
+  const { error } = await supabase
+    .from(T.PROPERTY_EXPENSES)
+    .update({
+      expense_date: data.expenseDate,
+      category: data.category.trim() || "Repair",
+      title: (data.title ?? "").trim(),
+      description: data.description.trim(),
+      vendor_name: data.vendorName.trim(),
+      amount: data.amount,
+      estimated_cost: data.estimatedCost ?? null,
+      priority: data.priority || "Normal",
+      work_status: data.workStatus || "Needs Attention",
+      target_date: data.targetDate || null,
+      completed_date: data.completedDate || null,
+      payment_method: data.paymentMethod.trim(),
+      reference_number: data.referenceNumber.trim(),
+      notes: data.notes.trim(),
+    })
+    .eq("user_id", user.id)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deletePropertyExpense(id: string): Promise<void> {
+  const user = await requireUser();
+  const { error } = await supabase.from(T.PROPERTY_EXPENSES).delete().eq("user_id", user.id).eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 // ============ LOANS ============
@@ -884,6 +1096,7 @@ export async function addLoan(data: Omit<Loan, "id" | "createdAt" | "updatedAt">
     reminder_note: data.reminderNote ?? "",
     reminder_completed: Boolean(data.reminderCompleted),
     reminder_completed_at: data.reminderCompletedAt || null,
+    reminder_dismissed: Boolean(data.reminderDismissed),
   };
   const { data: inserted, error } = await supabase.from(T.LOANS).insert(row).select("*").single();
   if (error) throw new Error(error.message);
@@ -927,6 +1140,7 @@ export async function updateLoan(id: string, data: Partial<Loan>): Promise<void>
   if (data.reminderCompleted !== undefined) patch.reminder_completed = data.reminderCompleted;
   if (data.reminderCompletedAt !== undefined)
     patch.reminder_completed_at = data.reminderCompletedAt || null;
+  if (data.reminderDismissed !== undefined) patch.reminder_dismissed = data.reminderDismissed;
   const { error } = await supabase.from(T.LOANS).update(patch).eq("user_id", user.id).eq("id", id);
   if (error) throw new Error(error.message);
 }
@@ -935,10 +1149,58 @@ export async function archiveLoan(id: string): Promise<void> {
   await updateLoan(id, { status: "Written Off" });
 }
 
+export async function deleteLoan(id: string): Promise<void> {
+  const user = await requireUser();
+  const docs = await getDocuments("loan", id);
+  const paths = docs.map((d) => d.storagePath).filter(Boolean) as string[];
+  if (paths.length > 0) {
+    const { error: se } = await supabase.storage.from(BARBARA_DOCUMENTS_BUCKET).remove(paths);
+    if (se) throw new Error(se.message);
+  }
+  const { error: d1 } = await supabase
+    .from(T.DOCUMENTS)
+    .delete()
+    .eq("user_id", user.id)
+    .eq("related_type", "loan")
+    .eq("related_id", id);
+  if (d1) throw new Error(d1.message);
+  const { error: d2 } = await supabase
+    .from(T.NOTES)
+    .delete()
+    .eq("user_id", user.id)
+    .eq("related_type", "loan")
+    .eq("related_id", id);
+  if (d2) throw new Error(d2.message);
+  const { error: d3 } = await supabase
+    .from(T.ACTIVITIES)
+    .delete()
+    .eq("user_id", user.id)
+    .eq("entity_type", "loan")
+    .eq("entity_id", id);
+  if (d3) throw new Error(d3.message);
+  const { error: d4 } = await supabase.from(T.LOANS).delete().eq("user_id", user.id).eq("id", id);
+  if (d4) throw new Error(d4.message);
+}
+
 export async function markLoanReminderDone(id: string): Promise<void> {
   await updateLoan(id, {
     reminderCompleted: true,
     reminderCompletedAt: new Date().toISOString(),
+    reminderDismissed: false,
+  });
+}
+
+export async function dismissLoanReminder(id: string): Promise<void> {
+  await updateLoan(id, { reminderDismissed: true });
+}
+
+export async function clearLoanReminder(id: string): Promise<void> {
+  await updateLoan(id, {
+    nextReminderDate: "",
+    reminderNote: "",
+    reminderCompleted: false,
+    reminderCompletedAt: "",
+    reminderDismissed: false,
   });
 }
 
@@ -968,7 +1230,7 @@ export async function getAllLoanTransactions(): Promise<LoanTransaction[]> {
 }
 
 export async function addLoanTransaction(
-  data: Omit<LoanTransaction, "id" | "createdAt">
+  data: Omit<LoanTransaction, "id" | "createdAt" | "voidedAt" | "voidReason">
 ): Promise<LoanTransaction> {
   const user = await requireUser();
   const row = {
@@ -1006,24 +1268,40 @@ export async function addLoanTransaction(
 
 export function calculateLoanBalance(transactions: LoanTransaction[]): number {
   let b = 0;
-  for (const t of transactions) b += t.chargeAmount - t.paymentAmount;
+  for (const t of transactions) {
+    if (t.voidedAt) continue;
+    b += t.chargeAmount - t.paymentAmount;
+  }
   return Math.max(0, b);
 }
 
 export function getLoanRunningBalanceTable(transactions: LoanTransaction[]) {
   let b = 0;
   return transactions.map((t) => {
-    b += t.chargeAmount - t.paymentAmount;
+    if (!t.voidedAt) b += t.chargeAmount - t.paymentAmount;
     return { ...t, runningBalance: b };
   });
 }
 
+export async function voidLoanTransaction(id: string, reason = ""): Promise<void> {
+  const user = await requireUser();
+  const { error } = await supabase
+    .from(T.LOAN_TXN)
+    .update({ voided_at: new Date().toISOString(), void_reason: reason.trim() })
+    .eq("user_id", user.id)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteLoanTransaction(id: string): Promise<void> {
+  const user = await requireUser();
+  const { error } = await supabase.from(T.LOAN_TXN).delete().eq("user_id", user.id).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
 // ============ NOTES ============
 
-export async function getNotes(
-  relatedType: "property" | "loan" | "general",
-  relatedId: string
-): Promise<Note[]> {
+export async function getNotes(relatedType: NoteRelatedType, relatedId: string): Promise<Note[]> {
   const user = await requireUser();
   let q = supabase.from(T.NOTES).select("*").eq("user_id", user.id);
   if (relatedType === "general") {
@@ -1043,12 +1321,19 @@ export async function getAllNotes(): Promise<Note[]> {
   return (data ?? []).map((r) => mapNote(r as Record<string, unknown>));
 }
 
-export async function addNote(data: Omit<Note, "id" | "createdAt">): Promise<Note> {
+export async function addNote(
+  data: Omit<Note, "id" | "createdAt" | "propertyId" | "loanId"> & {
+    propertyId?: string | null;
+    loanId?: string | null;
+  }
+): Promise<Note> {
   const user = await requireUser();
   const row = {
     user_id: user.id,
     related_type: data.relatedType,
     related_id: data.relatedId,
+    property_id: data.propertyId || null,
+    loan_id: data.loanId || null,
     note_date: data.noteDate,
     note_text: data.noteText,
     reminder_date: data.reminderDate || null,
@@ -1064,24 +1349,169 @@ export async function addNote(data: Omit<Note, "id" | "createdAt">): Promise<Not
       entityName = p.propertyName;
       personName = p.tenantName;
     }
-  } else if (data.relatedType === "loan") {
-    const l = await getLoan(data.relatedId);
+  } else if (data.relatedType === "tenant" || data.propertyId) {
+    const p = await getProperty(data.propertyId || data.relatedId);
+    if (p) {
+      entityName = p.propertyName;
+      personName = p.tenantName;
+    }
+  } else if (data.relatedType === "loan" || data.loanId) {
+    const l = await getLoan(data.loanId || data.relatedId);
     if (l) {
       entityName = `Loan to ${l.borrowerName}`;
       personName = l.borrowerName;
     }
   } else entityName = "General Note";
+  const activityEntity: "property" | "loan" =
+    data.relatedType === "loan" || (data.loanId && data.relatedType !== "property") ? "loan" : "property";
   await addActivity(user.id, {
     date: data.noteDate,
     type: "note",
-    entityType: data.relatedType === "general" ? "property" : data.relatedType,
-    entityId: data.relatedId,
+    entityType: activityEntity,
+    entityId: activityEntity === "loan" ? data.loanId || data.relatedId : data.propertyId || data.relatedId,
     entityName,
     personName,
     amount: 0,
     description: data.noteText.substring(0, 100),
   });
   return note;
+}
+
+export async function updateNote(
+  id: string,
+  data: { noteDate: string; noteText: string; reminderDate?: string }
+): Promise<void> {
+  const user = await requireUser();
+  const { error } = await supabase
+    .from(T.NOTES)
+    .update({
+      note_date: data.noteDate,
+      note_text: data.noteText.trim(),
+      reminder_date: data.reminderDate || null,
+    })
+    .eq("user_id", user.id)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteNote(id: string): Promise<void> {
+  const user = await requireUser();
+  const { error } = await supabase.from(T.NOTES).delete().eq("user_id", user.id).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function getPropertyScopedNotes(propertyId: string): Promise<Note[]> {
+  const notes = await getAllNotes();
+  return notes.filter(
+    (n) =>
+      n.propertyId === propertyId ||
+      ((n.relatedType === "property" || n.relatedType === "tenant") && n.relatedId === propertyId) ||
+      (n.relatedType === "payment" && n.propertyId === propertyId) ||
+      (n.relatedType === "repair" && n.propertyId === propertyId)
+  );
+}
+
+// ============ REMINDERS ============
+
+function mapReminder(row: Record<string, unknown>): Reminder {
+  const status = row.status === "completed" || row.status === "dismissed" ? row.status : "open";
+  return {
+    id: String(row.id),
+    dueDate: dateStr(row.due_date),
+    note: String(row.note ?? ""),
+    relatedType: (row.related_type as Reminder["relatedType"]) || "general",
+    relatedId: String(row.related_id ?? ""),
+    propertyId: row.property_id != null ? String(row.property_id) : null,
+    loanId: row.loan_id != null ? String(row.loan_id) : null,
+    status,
+    completedAt: row.completed_at ? String(row.completed_at) : "",
+    dismissedAt: row.dismissed_at ? String(row.dismissed_at) : "",
+    createdAt: String(row.created_at ?? ""),
+    updatedAt: String(row.updated_at ?? ""),
+  };
+}
+
+export async function getReminders(): Promise<Reminder[]> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.REMINDERS)
+    .select("*")
+    .eq("user_id", user.id)
+    .order("due_date", { ascending: true });
+  if (error) {
+    // The reminders table is added by a later migration. Keep the rest of the ledger usable until it is applied.
+    if (/barbara_reminders|schema cache|does not exist|could not find/i.test(error.message)) return [];
+    throw new Error(error.message);
+  }
+  return (data ?? []).map((r) => mapReminder(r as Record<string, unknown>));
+}
+
+export async function addReminder(
+  data: Omit<Reminder, "id" | "createdAt" | "updatedAt" | "completedAt" | "dismissedAt" | "status"> & {
+    status?: ReminderStatus;
+  }
+): Promise<Reminder> {
+  const user = await requireUser();
+  const { data: inserted, error } = await supabase
+    .from(T.REMINDERS)
+    .insert({
+      user_id: user.id,
+      due_date: data.dueDate,
+      note: data.note.trim(),
+      related_type: data.relatedType,
+      related_id: data.relatedId || "",
+      property_id: data.propertyId || null,
+      loan_id: data.loanId || null,
+      status: data.status || "open",
+    })
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  return mapReminder(inserted as Record<string, unknown>);
+}
+
+export async function updateReminder(
+  id: string,
+  data: { dueDate: string; note: string; relatedType?: ReminderRelatedType; relatedId?: string }
+): Promise<void> {
+  const user = await requireUser();
+  const patch: Record<string, unknown> = {
+    due_date: data.dueDate,
+    note: data.note.trim(),
+    status: "open",
+    completed_at: null,
+    dismissed_at: null,
+  };
+  if (data.relatedType !== undefined) patch.related_type = data.relatedType;
+  if (data.relatedId !== undefined) patch.related_id = data.relatedId;
+  const { error } = await supabase.from(T.REMINDERS).update(patch).eq("user_id", user.id).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function completeReminder(id: string): Promise<void> {
+  const user = await requireUser();
+  const { error } = await supabase
+    .from(T.REMINDERS)
+    .update({ status: "completed", completed_at: new Date().toISOString() })
+    .eq("user_id", user.id)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function dismissReminder(id: string): Promise<void> {
+  const user = await requireUser();
+  const { error } = await supabase
+    .from(T.REMINDERS)
+    .update({ status: "dismissed", dismissed_at: new Date().toISOString() })
+    .eq("user_id", user.id)
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteReminder(id: string): Promise<void> {
+  const user = await requireUser();
+  const { error } = await supabase.from(T.REMINDERS).delete().eq("user_id", user.id).eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 // ============ DOCUMENTS ============
@@ -1208,6 +1638,24 @@ export async function getDocumentSignedUrl(
   return data.signedUrl;
 }
 
+export async function deleteDocument(id: string): Promise<void> {
+  const user = await requireUser();
+  const { data, error } = await supabase
+    .from(T.DOCUMENTS)
+    .select("storage_path")
+    .eq("user_id", user.id)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const path = data?.storage_path ? String(data.storage_path) : "";
+  if (path) {
+    const { error: se } = await supabase.storage.from(BARBARA_DOCUMENTS_BUCKET).remove([path]);
+    if (se) throw new Error(se.message);
+  }
+  const { error: delErr } = await supabase.from(T.DOCUMENTS).delete().eq("user_id", user.id).eq("id", id);
+  if (delErr) throw new Error(delErr.message);
+}
+
 // ============ ACTIVITIES ============
 
 export async function getActivities(limit = 20): Promise<ActivityItem[]> {
@@ -1302,7 +1750,7 @@ export async function searchAll(query: string) {
   const allPropertyExpenses = await getAllPropertyExpenses();
   const propertyExpenses = allPropertyExpenses
     .filter((e) =>
-      [e.category, e.description, e.vendorName, e.referenceNumber, e.notes].some((f) =>
+      [e.category, e.title, e.description, e.vendorName, e.referenceNumber, e.notes].some((f) =>
         f?.toLowerCase().includes(q)
       )
     )
@@ -1322,8 +1770,8 @@ export async function getDashboardStats(year?: number) {
   const loanTxns = await getAllLoanTransactions();
   const properties = await getProperties();
   const loans = await getLoans();
-  const yearPropTxns = propTxns.filter((t) => t.date.startsWith(yearStr));
-  const yearLoanTxns = loanTxns.filter((t) => t.date.startsWith(yearStr));
+  const yearPropTxns = propTxns.filter((t) => t.date.startsWith(yearStr) && !t.voidedAt);
+  const yearLoanTxns = loanTxns.filter((t) => t.date.startsWith(yearStr) && !t.voidedAt);
   const totalRentalIncome = yearPropTxns
     .filter((t) => t.type === "payment")
     .reduce((s, t) => s + t.paymentAmount, 0);
@@ -1333,9 +1781,21 @@ export async function getDashboardStats(year?: number) {
   const totalLateFees = yearPropTxns
     .filter((t) => t.type === "late_fee")
     .reduce((s, t) => s + t.chargeAmount, 0);
+  const today = todayStr();
   let unpaidRent = 0;
   for (const p of properties.filter((p) => p.status === "Active" || p.status === "Past Due")) {
-    unpaidRent += calculatePropertyBalance(propTxns.filter((t) => t.propertyId === p.id));
+    unpaidRent += unpaidForDashboard({
+      schedule: {
+        frequency: p.rentFrequency,
+        expectedAmount: p.monthlyRent,
+        dueDay: p.rentDueDay,
+        anchorDate: p.rentAnchorDate,
+        intervalDays: p.rentIntervalDays,
+        leaseStart: p.leaseStartDate,
+      },
+      transactions: propTxns.filter((t) => t.propertyId === p.id),
+      today,
+    });
   }
   let openLoanBalances = 0;
   for (const l of loans.filter((l) => l.status === "Active" || l.status === "Past Due")) {
@@ -1377,10 +1837,10 @@ export async function generatePropertyTaxReport(year: number): Promise<PropertyT
   const reports: PropertyTaxReport[] = [];
   for (const property of properties) {
     const propTxns = allTxns.filter((t) => t.propertyId === property.id);
-    const yearTxns = propTxns.filter((t) => t.date.startsWith(yearStr));
+    const yearTxns = propTxns.filter((t) => t.date.startsWith(yearStr) && !t.voidedAt);
     const propExpenses = allExpenses.filter((e) => e.propertyId === property.id);
     const yearExpenses = propExpenses
-      .filter((e) => e.expenseDate.startsWith(yearStr))
+      .filter((e) => e.expenseDate.startsWith(yearStr) && e.amount > 0)
       .sort((a, b) => b.expenseDate.localeCompare(a.expenseDate) || b.id.localeCompare(a.id));
     const totalExpenses = yearExpenses.reduce((s, e) => s + e.amount, 0);
     if (yearTxns.length === 0 && yearExpenses.length === 0 && property.status === "Closed") continue;
@@ -1418,7 +1878,7 @@ export async function generateLoanTaxReport(year: number): Promise<LoanTaxReport
   const reports: LoanTaxReport[] = [];
   for (const loan of loans) {
     const loanTxns = allTxns.filter((t) => t.loanId === loan.id);
-    const yearTxns = loanTxns.filter((t) => t.date.startsWith(yearStr));
+    const yearTxns = loanTxns.filter((t) => t.date.startsWith(yearStr) && !t.voidedAt);
     if (yearTxns.length === 0 && loan.status === "Written Off") continue;
     const totalPayments = yearTxns
       .filter((t) => t.type === "payment")
@@ -1451,6 +1911,7 @@ export async function exportAllData(): Promise<string> {
     notes,
     documents,
     activities,
+    reminders,
   ] = await Promise.all([
     getProperties(),
     getAllPropertyTransactions(),
@@ -1460,6 +1921,7 @@ export async function exportAllData(): Promise<string> {
     getAllNotes(),
     getDocuments(),
     getActivities(1000),
+    getReminders(),
   ]);
   const settingsRes = await supabase.from(T.SETTINGS).select("*").eq("user_id", user.id).maybeSingle();
   if (settingsRes.error) throw new Error(settingsRes.error.message);
@@ -1473,6 +1935,7 @@ export async function exportAllData(): Promise<string> {
       loans,
       loanTransactions,
       notes,
+      reminders,
       documents,
       activities,
     },
@@ -1501,6 +1964,8 @@ export async function clearAllData(): Promise<void> {
   if (e0) throw new Error(e0.message);
   const { error: e1 } = await supabase.from(T.ACTIVITIES).delete().eq("user_id", uid);
   if (e1) throw new Error(e1.message);
+  const { error: e1b } = await supabase.from(T.REMINDERS).delete().eq("user_id", uid);
+  if (e1b) throw new Error(e1b.message);
   const { error: e2 } = await supabase.from(T.NOTES).delete().eq("user_id", uid);
   if (e2) throw new Error(e2.message);
   const { error: e3 } = await supabase.from(T.PROP_TXN).delete().eq("user_id", uid);

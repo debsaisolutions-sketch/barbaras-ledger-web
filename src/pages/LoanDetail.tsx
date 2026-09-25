@@ -12,6 +12,13 @@ import {
   updateLoan,
   archiveLoan,
   markLoanReminderDone,
+  dismissLoanReminder,
+  clearLoanReminder,
+  deleteLoan,
+  getReminders,
+  voidLoanTransaction,
+  deleteLoanTransaction,
+  type Reminder,
   type Loan,
   type LoanTransaction,
   type Note,
@@ -20,6 +27,9 @@ import {
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
 import { useRefresh } from "../App";
 import { downloadDocumentFile, openDocumentInNewTab } from "../documentFiles";
+import NotesList from "../components/NotesList";
+import RemindersPanel from "../components/RemindersPanel";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 export default function LoanDetail() {
   const { id } = useParams<{ id: string }>();
@@ -28,6 +38,9 @@ export default function LoanDetail() {
   const [loan, setLoan] = useState<Loan | null>(null);
   const [txns, setTxns] = useState<(LoanTransaction & { runningBalance: number })[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [txnAction, setTxnAction] = useState<null | { id: string; mode: "void" | "delete" }>(null);
+  const [txnBusy, setTxnBusy] = useState(false);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [tab, setTab] = useState<"balance" | "notes" | "docs">("balance");
   const [loading, setLoading] = useState(true);
@@ -59,16 +72,18 @@ export default function LoanDetail() {
           if (!cancelled) setLoan(null);
           return;
         }
-        const [rawTxns, n, d] = await Promise.all([
+        const [rawTxns, n, d, rems] = await Promise.all([
           getLoanTransactions(id),
           getNotes("loan", id),
           getDocuments("loan", id),
+          getReminders(),
         ]);
         if (cancelled) return;
         setLoan(l);
         setTxns(getLoanRunningBalanceTable(rawTxns));
         setNotes(n);
         setDocs(d);
+        setReminders(rems);
       } catch (e) {
         if (!cancelled) console.error(e);
       } finally {
@@ -156,6 +171,35 @@ export default function LoanDetail() {
       alert("Reminder marked done.");
     } catch (err) {
       alert((err as Error).message || "Could not update reminder.");
+    }
+  };
+
+  const confirmTxnAction = async () => {
+    if (!txnAction) return;
+    try {
+      setTxnBusy(true);
+      if (txnAction.mode === "void") await voidLoanTransaction(txnAction.id);
+      else await deleteLoanTransaction(txnAction.id);
+      setTxnAction(null);
+      refresh();
+    } catch (err) {
+      alert((err as Error).message || "Could not update this transaction.");
+    } finally {
+      setTxnBusy(false);
+    }
+  };
+
+  const confirmDeleteLoan = async () => {
+    if (!loan) return;
+    if (!window.confirm(`Permanently delete "${loan.borrowerName}" and its records? This is for test entries you do not need to keep.`)) {
+      return;
+    }
+    try {
+      await deleteLoan(loan.id);
+      refresh();
+      navigate("/loans");
+    } catch (err) {
+      alert((err as Error).message || "Could not delete loan.");
     }
   };
 
@@ -302,6 +346,9 @@ export default function LoanDetail() {
             Write Off
           </button>
         )}
+        <button className="btn btn-danger btn-sm" onClick={() => void confirmDeleteLoan()}>
+          Delete loan
+        </button>
       </div>
 
       {(loan.nextReminderDate || loan.reminderNote || loan.reminderCompleted) && (
@@ -327,12 +374,32 @@ export default function LoanDetail() {
             </button>
             {!loan.reminderCompleted && loan.nextReminderDate && (
               <button className="btn btn-primary btn-sm" onClick={() => void markReminderDone()}>
-                Mark Done
+                Mark complete
               </button>
             )}
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={() =>
+                void dismissLoanReminder(loan.id).then(refresh).catch((e) => alert((e as Error).message))
+              }
+            >
+              Dismiss
+            </button>
+            <button
+              className="btn btn-danger btn-sm"
+              onClick={() => {
+                if (window.confirm("Delete this reminder?")) {
+                  void clearLoanReminder(loan.id).then(refresh).catch((e) => alert((e as Error).message));
+                }
+              }}
+            >
+              Delete
+            </button>
           </div>
         </div>
       )}
+
+      <RemindersPanel loan={loan} reminders={reminders} hideLegacy onChanged={refresh} />
 
       <div className="card" style={{ marginBottom: 20 }}>
         <h3 style={{ marginBottom: 10 }}>Loan Documents</h3>
@@ -412,13 +479,15 @@ export default function LoanDetail() {
                   <th>Charges</th>
                   <th>Payments</th>
                   <th>Balance</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
                 {txns.map((t) => (
-                  <tr key={t.id}>
+                  <tr key={t.id} style={t.voidedAt ? { opacity: 0.55 } : undefined}>
                     <td>{fmtDate(t.date)}</td>
                     <td>
+                      {t.voidedAt ? "Voided · " : ""}
                       {t.description}
                       {t.paymentMethod ? ` (${t.paymentMethod})` : ""}
                       {t.checkNumber ? ` #${t.checkNumber}` : ""}
@@ -431,6 +500,18 @@ export default function LoanDetail() {
                       {t.paymentAmount > 0 ? fmtCurrency(t.paymentAmount) : ""}
                     </td>
                     <td style={{ fontWeight: 700 }}>{fmtCurrency(Math.max(0, t.runningBalance))}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {!t.voidedAt && (
+                          <button type="button" className="btn btn-outline btn-sm" onClick={() => setTxnAction({ id: t.id, mode: "void" })}>
+                            Void
+                          </button>
+                        )}
+                        <button type="button" className="btn btn-danger btn-sm" onClick={() => setTxnAction({ id: t.id, mode: "delete" })}>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -438,22 +519,7 @@ export default function LoanDetail() {
           </div>
         ))}
 
-      {tab === "notes" &&
-        (notes.length === 0 ? (
-          <div className="empty-state">
-            <p>No notes yet.</p>
-          </div>
-        ) : (
-          notes.map((n) => (
-            <div key={n.id} className="card">
-              <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>
-                {fmtDate(n.noteDate)}
-                {n.reminderDate ? ` · Reminder: ${fmtDate(n.reminderDate)}` : ""}
-              </div>
-              <div style={{ fontSize: 16, whiteSpace: "pre-wrap" }}>{n.noteText}</div>
-            </div>
-          ))
-        ))}
+      {tab === "notes" && <NotesList notes={notes} onChanged={refresh} />}
 
       {tab === "docs" &&
         (docs.length === 0 ? (
@@ -497,6 +563,23 @@ export default function LoanDetail() {
             </div>
           ))
         ))}
+
+      {txnAction && (
+        <ConfirmDialog
+          title={txnAction.mode === "void" ? "Void this transaction?" : "Delete this transaction?"}
+          confirmLabel={txnAction.mode === "void" ? "Void — keep the record" : "Delete permanently"}
+          danger={txnAction.mode === "delete"}
+          busy={txnBusy}
+          onCancel={() => setTxnAction(null)}
+          onConfirm={() => void confirmTxnAction()}
+        >
+          <p style={{ margin: 0 }}>
+            {txnAction.mode === "void"
+              ? "Void keeps the row in your history, but it will not count toward the balance."
+              : "Permanent delete is for a test entry you do not need to keep."}
+          </p>
+        </ConfirmDialog>
+      )}
 
       {showReminderModal && (
         <div className="modal-overlay" onClick={() => !savingReminder && setShowReminderModal(false)}>

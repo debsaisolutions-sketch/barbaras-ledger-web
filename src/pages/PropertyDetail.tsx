@@ -4,29 +4,35 @@ import {
   getProperty,
   getPropertyTransactions,
   getRunningBalanceTable,
-  getNotes,
+  getPropertyScopedNotes,
   getDocuments,
   getPropertyExpenses,
-  addPropertyExpense,
+  getReminders,
   addDocumentWithFile,
   getLedgerDisplayName,
-  updateProperty,
   archiveProperty,
-  markPropertyReminderDone,
   markPropertySold,
   deleteProperty,
-  PAYMENT_METHOD_OPTIONS,
-  PROPERTY_EXPENSE_CATEGORIES,
+  deleteDocument,
+  voidPropertyTransaction,
+  deletePropertyTransaction,
+  addNote,
   type Property,
   type PropertyTransaction,
   type PropertyExpense,
   type Note,
   type Document as Doc,
   type DocumentType,
+  type Reminder,
 } from "../store";
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
 import { useRefresh } from "../App";
 import { downloadDocumentFile, openDocumentInNewTab } from "../documentFiles";
+import RentPeriodList from "../components/RentPeriodList";
+import RepairsPanel from "../components/RepairsPanel";
+import RemindersPanel from "../components/RemindersPanel";
+import NotesList from "../components/NotesList";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
@@ -37,6 +43,8 @@ export default function PropertyDetail() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [expenses, setExpenses] = useState<PropertyExpense[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [askReminder, setAskReminder] = useState(false);
   const [tab, setTab] = useState<"balance" | "notes" | "docs">("balance");
   const [loading, setLoading] = useState(true);
   const [showSoldModal, setShowSoldModal] = useState(false);
@@ -49,8 +57,6 @@ export default function PropertyDetail() {
   const [savingSold, setSavingSold] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingProperty, setDeletingProperty] = useState(false);
-  const [showReminderModal, setShowReminderModal] = useState(false);
-  const [savingReminder, setSavingReminder] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [savingUpload, setSavingUpload] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -59,24 +65,11 @@ export default function PropertyDetail() {
     type: "Other" as DocumentType,
     notes: "",
   });
-  const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [savingExpense, setSavingExpense] = useState(false);
-  const [expenseReceiptFile, setExpenseReceiptFile] = useState<File | null>(null);
-  const [expenseForm, setExpenseForm] = useState({
-    expenseDate: new Date().toISOString().split("T")[0],
-    category: "Other" as string,
-    description: "",
-    vendorName: "",
-    amount: "",
-    paymentMethod: "",
-    referenceNumber: "",
-    notes: "",
-  });
   const [ledgerTitle, setLedgerTitle] = useState("EasyLedger");
-  const [reminderForm, setReminderForm] = useState({
-    reminderDate: "",
-    reminderNote: "",
-  });
+  const [txnAction, setTxnAction] = useState<null | { id: string; mode: "void" | "delete" }>(null);
+  const [txnBusy, setTxnBusy] = useState(false);
+  const [docToDelete, setDocToDelete] = useState<Doc | null>(null);
+  const [docBusy, setDocBusy] = useState(false);
   const balance = txns.length > 0 ? txns[txns.length - 1].runningBalance : 0;
   const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
 
@@ -96,11 +89,12 @@ export default function PropertyDetail() {
           if (!cancelled) setProperty(null);
           return;
         }
-        const [rawTxns, n, d, ex] = await Promise.all([
+        const [rawTxns, n, d, ex, rems] = await Promise.all([
           getPropertyTransactions(id),
-          getNotes("property", id),
+          getPropertyScopedNotes(id),
           getDocuments("property", id),
           getPropertyExpenses(id),
+          getReminders(),
         ]);
         if (cancelled) return;
         setProperty(p);
@@ -108,6 +102,7 @@ export default function PropertyDetail() {
         setNotes(n);
         setDocs(d);
         setExpenses(ex);
+        setReminders(rems);
       } catch (e) {
         if (!cancelled) console.error(e);
       } finally {
@@ -198,104 +193,32 @@ export default function PropertyDetail() {
     }
   };
 
-  const openReminderModal = () => {
-    if (!property) return;
-    setReminderForm({
-      reminderDate: property.nextReminderDate || "",
-      reminderNote: property.reminderNote || "",
-    });
-    setShowReminderModal(true);
-  };
-
-  const saveReminder = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!property) return;
-    const reminderDate = reminderForm.reminderDate.trim();
-    const reminderNote = reminderForm.reminderNote.trim();
-    if (!reminderDate) {
-      if (reminderNote) {
-        alert("Please choose a reminder date so this can appear on your Dashboard.");
-      } else {
-        alert("Please choose a reminder date.");
-      }
-      return;
-    }
+  const confirmTxnAction = async () => {
+    if (!txnAction) return;
     try {
-      setSavingReminder(true);
-      await updateProperty(property.id, {
-        nextReminderDate: reminderDate,
-        reminderNote,
-        reminderCompleted: false,
-        reminderCompletedAt: "",
-      });
-      setShowReminderModal(false);
+      setTxnBusy(true);
+      if (txnAction.mode === "void") await voidPropertyTransaction(txnAction.id, "Voided from property page");
+      else await deletePropertyTransaction(txnAction.id);
+      setTxnAction(null);
       refresh();
-      alert("Reminder saved.");
     } catch (err) {
-      alert((err as Error).message || "Could not save reminder.");
+      alert((err as Error).message || "Could not update this transaction.");
     } finally {
-      setSavingReminder(false);
+      setTxnBusy(false);
     }
   };
 
-  const markReminderDone = async () => {
-    if (!property) return;
+  const confirmDeleteDoc = async () => {
+    if (!docToDelete) return;
     try {
-      await markPropertyReminderDone(property.id);
+      setDocBusy(true);
+      await deleteDocument(docToDelete.id);
+      setDocToDelete(null);
       refresh();
-      alert("Reminder marked done.");
     } catch (err) {
-      alert((err as Error).message || "Could not update reminder.");
-    }
-  };
-
-  const openExpenseModal = () => {
-    setExpenseForm({
-      expenseDate: new Date().toISOString().split("T")[0],
-      category: "Other",
-      description: "",
-      vendorName: "",
-      amount: "",
-      paymentMethod: "",
-      referenceNumber: "",
-      notes: "",
-    });
-    setExpenseReceiptFile(null);
-    setShowExpenseModal(true);
-  };
-
-  const saveExpense = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!property || !id) return;
-    const amt = parseFloat(expenseForm.amount);
-    if (expenseForm.amount.trim() === "" || Number.isNaN(amt) || amt < 0) {
-      alert("Please enter a valid amount (0 or more).");
-      return;
-    }
-    try {
-      setSavingExpense(true);
-      await addPropertyExpense(
-        property.id,
-        {
-          expenseDate: expenseForm.expenseDate,
-          category: expenseForm.category,
-          description: expenseForm.description,
-          vendorName: expenseForm.vendorName,
-          amount: amt,
-          paymentMethod: expenseForm.paymentMethod,
-          referenceNumber: expenseForm.referenceNumber,
-          notes: expenseForm.notes,
-        },
-        expenseReceiptFile
-      );
-      setShowExpenseModal(false);
-      setExpenseReceiptFile(null);
-      refresh();
-      alert("Expense saved.");
-    } catch (err) {
-      alert((err as Error).message || "Could not save expense.");
+      alert((err as Error).message || "Could not delete document.");
     } finally {
-      setSavingExpense(false);
+      setDocBusy(false);
     }
   };
 
@@ -414,12 +337,27 @@ export default function PropertyDetail() {
             <p>{property.tenantEmail || "—"}</p>
           </div>
           <div className="detail-info-item">
-            <label>Monthly Rent</label>
-            <p>{fmtCurrency(property.monthlyRent)}</p>
+            <label>Expected rent</label>
+            <p>
+              {fmtCurrency(property.monthlyRent)}
+              {property.rentFrequency === "weekly"
+                ? " weekly"
+                : property.rentFrequency === "biweekly"
+                  ? " every two weeks"
+                  : property.rentFrequency === "custom"
+                    ? ` every ${property.rentIntervalDays || 30} days`
+                    : " monthly"}
+            </p>
           </div>
           <div className="detail-info-item">
-            <label>Rent Due Day</label>
-            <p>{property.rentDueDay || "—"}</p>
+            <label>{property.rentFrequency === "monthly" ? "Rent due day" : "Schedule starts"}</label>
+            <p>
+              {property.rentFrequency === "monthly"
+                ? property.rentDueDay || "—"
+                : property.rentAnchorDate
+                  ? fmtDate(property.rentAnchorDate)
+                  : "—"}
+            </p>
           </div>
           <div className="detail-info-item">
             <label>Lease Period</label>
@@ -463,7 +401,7 @@ export default function PropertyDetail() {
         <button className="btn btn-secondary btn-lg" onClick={() => navigate(`/properties/${id}/note`)}>
           📝 Add Note
         </button>
-        <button className="btn btn-secondary btn-lg" onClick={openReminderModal}>
+        <button className="btn btn-secondary btn-lg" onClick={() => setAskReminder(true)}>
           ⏰ Add Reminder
         </button>
         <button className="btn btn-secondary btn-lg" onClick={() => setShowUploadModal(true)}>
@@ -497,35 +435,58 @@ export default function PropertyDetail() {
         </div>
       </div>
 
-      {(property.nextReminderDate || property.reminderNote || property.reminderCompleted) && (
-        <div className="card" style={{ marginBottom: 20 }}>
-          <h3 style={{ marginBottom: 10 }}>Current Reminder</h3>
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h3 style={{ marginBottom: 10 }}>Loan or mortgage</h3>
+        {property.loanPaidOff ? (
+          <p style={{ margin: 0 }}>Paid off, or no loan entered.</p>
+        ) : (
           <div className="detail-info-grid">
             <div className="detail-info-item">
-              <label>Reminder date</label>
-              <p>{property.nextReminderDate ? fmtDate(property.nextReminderDate) : "—"}</p>
+              <label>Lender</label>
+              <p>{property.lender || "—"}</p>
             </div>
             <div className="detail-info-item">
-              <label>Reminder note</label>
-              <p style={{ whiteSpace: "pre-wrap" }}>{property.reminderNote || "—"}</p>
+              <label>Original amount</label>
+              <p>{property.originalLoanAmount != null ? fmtCurrency(property.originalLoanAmount) : "—"}</p>
             </div>
             <div className="detail-info-item">
-              <label>Status</label>
-              <p>{property.reminderCompleted ? "Done" : "Open"}</p>
+              <label>Remaining balance</label>
+              <p>{property.remainingLoanBalance != null ? fmtCurrency(property.remainingLoanBalance) : "—"}</p>
             </div>
+            <div className="detail-info-item">
+              <label>Regular payment</label>
+              <p>
+                {property.loanPaymentAmount != null ? fmtCurrency(property.loanPaymentAmount) : "—"}
+                {property.loanPaymentFrequency ? ` · ${property.loanPaymentFrequency}` : ""}
+              </p>
+            </div>
+            <div className="detail-info-item">
+              <label>Due</label>
+              <p>{property.loanPaymentDue || "—"}</p>
+            </div>
+            <div className="detail-info-item">
+              <label>Interest rate</label>
+              <p>{property.loanInterestRate != null ? `${property.loanInterestRate}%` : "—"}</p>
+            </div>
+            {property.loanNotes ? (
+              <div className="detail-info-item">
+                <label>Loan notes</label>
+                <p style={{ whiteSpace: "pre-wrap" }}>{property.loanNotes}</p>
+              </div>
+            ) : null}
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-            <button className="btn btn-outline btn-sm" onClick={openReminderModal}>
-              Edit Reminder
-            </button>
-            {!property.reminderCompleted && property.nextReminderDate && (
-              <button className="btn btn-primary btn-sm" onClick={() => void markReminderDone()}>
-                Mark Done
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      <RentPeriodList property={property} transactions={txns} />
+
+      <RemindersPanel
+        property={property}
+        reminders={reminders}
+        startOpen={askReminder}
+        onStartOpenHandled={() => setAskReminder(false)}
+        onChanged={refresh}
+      />
 
       <div className="card" style={{ marginBottom: 20 }}>
         <h3 style={{ marginBottom: 10 }}>Property Documents</h3>
@@ -565,83 +526,23 @@ export default function PropertyDetail() {
                   >
                     Download
                   </button>
+                  <button type="button" className="btn btn-danger btn-sm" onClick={() => setDocToDelete(d)}>
+                    Delete
+                  </button>
                 </div>
-              ) : null}
+              ) : (
+                <button type="button" className="btn btn-danger btn-sm" onClick={() => setDocToDelete(d)}>
+                  Delete
+                </button>
+              )}
             </div>
           ))
         )}
       </div>
 
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: 12,
-            marginBottom: 12,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>Repairs &amp; Expenses</h3>
-          <button type="button" className="btn btn-primary btn-lg" onClick={openExpenseModal}>
-            Add Expense / Receipt
-          </button>
-        </div>
-        <p style={{ color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
-          Track maintenance, repairs, and receipts for your records (for example, at tax time).
-        </p>
-        {expenses.length === 0 ? (
-          <p style={{ color: "var(--muted)" }}>No expenses recorded yet. Use Add Expense / Receipt to add one.</p>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Category</th>
-                  <th>Description</th>
-                  <th>Vendor</th>
-                  <th>Amount</th>
-                  <th>Receipt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {expenses.map((ex) => {
-                  const receiptDoc = ex.documentId ? docs.find((d) => d.id === ex.documentId) : undefined;
-                  return (
-                    <tr key={ex.id}>
-                      <td>{fmtDate(ex.expenseDate)}</td>
-                      <td>{ex.category}</td>
-                      <td>{ex.description || "—"}</td>
-                      <td>{ex.vendorName || "—"}</td>
-                      <td>{fmtCurrency(ex.amount)}</td>
-                      <td>
-                        {receiptDoc?.storagePath ? (
-                          <button
-                            type="button"
-                            className="btn btn-outline btn-sm"
-                            onClick={async () => {
-                              const ok = await openDocumentInNewTab(receiptDoc.storagePath!);
-                              if (!ok) alert("Could not open receipt. Try again.");
-                            }}
-                          >
-                            View receipt
-                          </button>
-                        ) : ex.documentId ? (
-                          <span style={{ color: "var(--muted)" }}>File…</span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {id && (
+        <RepairsPanel propertyId={id} expenses={expenses} docs={docs} onChanged={refresh} />
+      )}
 
       {showDeleteModal && (
         <div
@@ -758,161 +659,40 @@ export default function PropertyDetail() {
         </div>
       )}
 
-      {showReminderModal && (
-        <div className="modal-overlay" onClick={() => !savingReminder && setShowReminderModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Add Reminder</h3>
-            <p style={{ color: "var(--muted)", marginBottom: 14, lineHeight: 1.5 }}>
-              Use reminders for things you need to check or follow up on, like checking your bank
-              account for a direct deposit.
+
+      {txnAction && (
+        <ConfirmDialog
+          title={txnAction.mode === "void" ? "Void this transaction?" : "Delete this transaction?"}
+          confirmLabel={txnAction.mode === "void" ? "Void — keep the record" : "Delete permanently"}
+          danger={txnAction.mode === "delete"}
+          busy={txnBusy}
+          onCancel={() => setTxnAction(null)}
+          onConfirm={() => void confirmTxnAction()}
+        >
+          {txnAction.mode === "void" ? (
+            <p style={{ margin: 0 }}>
+              Void keeps the payment or charge in your history, but it will not count toward rent or the balance.
+              Use this for a mistake you still want to see.
             </p>
-            <form onSubmit={(e) => void saveReminder(e)}>
-              <div className="form-group">
-                <label>Reminder Date *</label>
-                <input
-                  type="date"
-                  value={reminderForm.reminderDate}
-                  onChange={(e) => setReminderForm((f) => ({ ...f, reminderDate: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label>Reminder Note</label>
-                <textarea
-                  value={reminderForm.reminderNote}
-                  onChange={(e) => setReminderForm((f) => ({ ...f, reminderNote: e.target.value }))}
-                  style={{ minHeight: 90 }}
-                />
-              </div>
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="btn btn-outline btn-lg"
-                  onClick={() => setShowReminderModal(false)}
-                  disabled={savingReminder}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary btn-lg" disabled={savingReminder}>
-                  {savingReminder ? "Saving…" : "Save Reminder"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+          ) : (
+            <p style={{ margin: 0 }}>
+              Permanent delete is for test entries or mistakes you do not need to keep. This cannot be undone.
+            </p>
+          )}
+        </ConfirmDialog>
       )}
 
-      {showExpenseModal && (
-        <div className="modal-overlay" onClick={() => !savingExpense && setShowExpenseModal(false)}>
-          <div
-            className="modal"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxHeight: "90vh", overflowY: "auto", maxWidth: 520 }}
-          >
-            <h3>Add Expense / Receipt</h3>
-            <p style={{ color: "var(--muted)", marginBottom: 14, lineHeight: 1.5 }}>
-              Save a repair, bill, or other property cost. You can attach a receipt photo or PDF if you have one.
-            </p>
-            <form onSubmit={(e) => void saveExpense(e)}>
-              <div className="form-group">
-                <label>Date *</label>
-                <input
-                  type="date"
-                  value={expenseForm.expenseDate}
-                  onChange={(e) => setExpenseForm((f) => ({ ...f, expenseDate: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label>Category</label>
-                <select
-                  value={expenseForm.category}
-                  onChange={(e) => setExpenseForm((f) => ({ ...f, category: e.target.value }))}
-                >
-                  {PROPERTY_EXPENSE_CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Description</label>
-                <textarea
-                  value={expenseForm.description}
-                  onChange={(e) => setExpenseForm((f) => ({ ...f, description: e.target.value }))}
-                  style={{ minHeight: 72 }}
-                />
-              </div>
-              <div className="form-group">
-                <label>Vendor / Paid To</label>
-                <input
-                  value={expenseForm.vendorName}
-                  onChange={(e) => setExpenseForm((f) => ({ ...f, vendorName: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label>Amount ($) *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  value={expenseForm.amount}
-                  onChange={(e) => setExpenseForm((f) => ({ ...f, amount: e.target.value }))}
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="form-group">
-                <label>Payment Method</label>
-                <select
-                  value={expenseForm.paymentMethod}
-                  onChange={(e) => setExpenseForm((f) => ({ ...f, paymentMethod: e.target.value }))}
-                >
-                  <option value="">—</option>
-                  {PAYMENT_METHOD_OPTIONS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Reference Number</label>
-                <input
-                  value={expenseForm.referenceNumber}
-                  onChange={(e) => setExpenseForm((f) => ({ ...f, referenceNumber: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label>Notes</label>
-                <textarea
-                  value={expenseForm.notes}
-                  onChange={(e) => setExpenseForm((f) => ({ ...f, notes: e.target.value }))}
-                  style={{ minHeight: 72 }}
-                />
-              </div>
-              <div className="form-group">
-                <label>Receipt (optional)</label>
-                <input
-                  type="file"
-                  accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.heic,.heif,.webp,image/*,application/pdf"
-                  onChange={(e) => setExpenseReceiptFile(e.target.files?.[0] ?? null)}
-                />
-              </div>
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="btn btn-outline btn-lg"
-                  onClick={() => setShowExpenseModal(false)}
-                  disabled={savingExpense}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary btn-lg" disabled={savingExpense}>
-                  {savingExpense ? "Saving…" : "Save Expense"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {docToDelete && (
+        <ConfirmDialog
+          title="Delete this document?"
+          confirmLabel="Delete document"
+          danger
+          busy={docBusy}
+          onCancel={() => setDocToDelete(null)}
+          onConfirm={() => void confirmDeleteDoc()}
+        >
+          <p style={{ margin: 0 }}>This removes {docToDelete.documentName} from your records.</p>
+        </ConfirmDialog>
       )}
 
       {showUploadModal && (
@@ -1100,13 +880,45 @@ export default function PropertyDetail() {
               </thead>
               <tbody>
                 {txns.map((t) => (
-                  <tr key={t.id}>
+                  <tr key={t.id} style={t.voidedAt ? { opacity: 0.55 } : undefined}>
                     <td>{fmtDate(t.date)}</td>
                     <td>
+                      {t.voidedAt ? "Voided · " : ""}
                       {t.description}
                       {t.paymentMethod ? ` (${t.paymentMethod})` : ""}
                       {t.checkNumber ? ` #${t.checkNumber}` : ""}
                       {t.referenceNumber ? ` · Ref: ${t.referenceNumber}` : ""}
+                      {t.rentPeriodStart ? ` · Period ${fmtDate(t.rentPeriodStart)}` : ""}
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                        {!t.voidedAt && (
+                          <button type="button" className="btn btn-outline btn-sm" onClick={() => setTxnAction({ id: t.id, mode: "void" })}>
+                            Void
+                          </button>
+                        )}
+                        <button type="button" className="btn btn-danger btn-sm" onClick={() => setTxnAction({ id: t.id, mode: "delete" })}>
+                          Delete
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          onClick={() => {
+                            const text = window.prompt("Note about this payment or charge");
+                            if (!text?.trim() || !property) return;
+                            void addNote({
+                              relatedType: t.type === "payment" ? "payment" : "property",
+                              relatedId: t.type === "payment" ? t.id : property.id,
+                              propertyId: property.id,
+                              noteDate: new Date().toISOString().split("T")[0],
+                              noteText: text.trim(),
+                              reminderDate: "",
+                            })
+                              .then(refresh)
+                              .catch((error) => alert((error as Error).message || "Could not save note."));
+                          }}
+                        >
+                          Add note
+                        </button>
+                      </div>
                     </td>
                     <td style={{ color: t.chargeAmount > 0 ? "var(--error)" : "" }}>
                       {t.chargeAmount > 0 ? fmtCurrency(t.chargeAmount) : ""}
@@ -1122,22 +934,7 @@ export default function PropertyDetail() {
           </div>
         ))}
 
-      {tab === "notes" &&
-        (notes.length === 0 ? (
-          <div className="empty-state">
-            <p>No notes yet.</p>
-          </div>
-        ) : (
-          notes.map((n) => (
-            <div key={n.id} className="card">
-              <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>
-                {fmtDate(n.noteDate)}
-                {n.reminderDate ? ` · Reminder: ${fmtDate(n.reminderDate)}` : ""}
-              </div>
-              <div style={{ fontSize: 16, whiteSpace: "pre-wrap" }}>{n.noteText}</div>
-            </div>
-          ))
-        ))}
+      {tab === "notes" && <NotesList notes={notes} onChanged={refresh} />}
 
       {tab === "docs" &&
         (docs.length === 0 ? (
@@ -1176,8 +973,15 @@ export default function PropertyDetail() {
                   >
                     Download
                   </button>
+                  <button type="button" className="btn btn-danger btn-sm" onClick={() => setDocToDelete(d)}>
+                    Delete
+                  </button>
                 </div>
-              ) : null}
+              ) : (
+                <button type="button" className="btn btn-danger btn-sm" onClick={() => setDocToDelete(d)}>
+                  Delete
+                </button>
+              )}
             </div>
           ))
         ))}

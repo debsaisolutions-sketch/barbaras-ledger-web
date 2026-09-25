@@ -9,6 +9,8 @@ import {
   type PaymentMethod,
   type ApplyTo,
 } from "../store";
+import { summarizeVisiblePeriods } from "../rentSchedule";
+import { fmtCurrency, fmtDate } from "../helpers";
 import { useRefresh } from "../App";
 
 export default function AddRentalPayment() {
@@ -28,6 +30,7 @@ export default function AddRentalPayment() {
   });
   const [attachment, setAttachment] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [periodKey, setPeriodKey] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -50,6 +53,31 @@ export default function AddRentalPayment() {
   useEffect(() => {
     if (id) setForm((f) => ({ ...f, propertyId: id }));
   }, [id]);
+
+  const selected = properties.find((p) => p.id === form.propertyId);
+  const today = new Date().toISOString().split("T")[0];
+  const periods = selected
+    ? summarizeVisiblePeriods(
+        {
+          frequency: selected.rentFrequency,
+          expectedAmount: selected.monthlyRent,
+          dueDay: selected.rentDueDay,
+          anchorDate: selected.rentAnchorDate,
+          intervalDays: selected.rentIntervalDays,
+          leaseStart: selected.leaseStartDate,
+        },
+        [],
+        today
+      )
+    : [];
+
+  useEffect(() => {
+    if (!selected) return;
+    const current = periods.find((p) => p.start <= today && today <= p.end);
+    setPeriodKey(current ? `${current.start}|${current.end}` : "");
+    // Reset the suggested period when the property changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
 
   const set = (f: string, v: string) => setForm((prev) => ({ ...prev, [f]: v }));
 
@@ -77,6 +105,8 @@ export default function AddRentalPayment() {
         referenceNumber: form.referenceNumber.trim(),
         applyTo: form.applyTo,
         notes: form.notes.trim(),
+        rentPeriodStart: form.applyTo === "Rent" && periodKey ? periodKey.split("|")[0] : "",
+        rentPeriodEnd: form.applyTo === "Rent" && periodKey ? periodKey.split("|")[1] : "",
       });
       if (attachment) {
         const baseName = attachment.name.trim() || "payment-proof";
@@ -138,6 +168,32 @@ export default function AddRentalPayment() {
               />
             </div>
           </div>
+          <p style={{ color: "var(--muted)", fontSize: 14, marginTop: -4 }}>
+            The amount does not have to match the scheduled rent. A partial payment is fine, and you can add another
+            payment later for the same period.
+          </p>
+          {selected && (
+            <div className="form-group">
+              <label>Tenant</label>
+              <input value={selected.tenantName || "No tenant name saved"} readOnly />
+            </div>
+          )}
+          {form.applyTo === "Rent" && selected && selected.monthlyRent > 0 && periods.length > 0 && (
+            <div className="form-group">
+              <label>Rent period this payment applies to</label>
+              <select value={periodKey} onChange={(e) => setPeriodKey(e.target.value)}>
+                <option value="">Not tied to a specific period</option>
+                {periods.map((p) => (
+                  <option key={`${p.start}|${p.end}`} value={`${p.start}|${p.end}`}>
+                    {fmtDate(p.start)} – {fmtDate(p.end)} · expected {fmtCurrency(p.expected)}
+                  </option>
+                ))}
+              </select>
+              <p style={{ color: "var(--muted)", fontSize: 14, marginTop: 8 }}>
+                The payment date can be earlier or later than the due date.
+              </p>
+            </div>
+          )}
           <div className="form-row">
             <div className="form-group">
               <label>Payment method</label>

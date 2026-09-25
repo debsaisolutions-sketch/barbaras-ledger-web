@@ -116,6 +116,10 @@ tr:hover td { background: #f8f9fa; }
 .badge-sold { background: #E0E7FF; color: #4338CA; }
 .badge-vacant { background: var(--warning-bg); color: var(--warning); }
 .badge-paid { background: var(--success-bg); color: var(--success); }
+.badge-partial { background: var(--warning-bg); color: var(--warning); }
+.badge-unpaid { background: #F3F4F6; color: #374151; }
+.badge-overdue { background: var(--error-bg); color: var(--error); }
+.badge-overpaid { background: #E0E7FF; color: #4338CA; }
 
 /* Page header */
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }

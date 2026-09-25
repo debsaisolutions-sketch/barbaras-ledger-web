@@ -8,6 +8,13 @@ import {
   getUpcomingReminders,
   markPropertyReminderDone,
   markLoanReminderDone,
+  dismissPropertyReminder,
+  dismissLoanReminder,
+  clearPropertyReminder,
+  clearLoanReminder,
+  completeReminder,
+  dismissReminder,
+  deleteReminder,
   type ActivityItem,
   type ReminderListItem,
 } from "../store";
@@ -81,15 +88,23 @@ export default function Dashboard() {
     }
   };
 
-  const handleMarkDone = async (r: ReminderListItem) => {
-    const keyForRow = `${r.entityType}:${r.entityId}`;
+  const handleReminder = async (r: ReminderListItem, action: "done" | "dismiss" | "delete") => {
     try {
-      setMarkingReminderKey(keyForRow);
-      if (r.entityType === "property") await markPropertyReminderDone(r.entityId);
-      else await markLoanReminderDone(r.entityId);
-      setReminders((prev) => prev.filter((x) => !(x.entityType === r.entityType && x.entityId === r.entityId)));
+      setMarkingReminderKey(r.id + action);
+      if (r.source === "reminder") {
+        if (action === "done") await completeReminder(r.id);
+        else if (action === "dismiss") await dismissReminder(r.id);
+        else await deleteReminder(r.id);
+      } else if (r.source === "legacy-property") {
+        if (action === "done") await markPropertyReminderDone(r.entityId);
+        else if (action === "dismiss") await dismissPropertyReminder(r.entityId);
+        else await clearPropertyReminder(r.entityId);
+      } else if (action === "done") await markLoanReminderDone(r.entityId);
+      else if (action === "dismiss") await dismissLoanReminder(r.entityId);
+      else await clearLoanReminder(r.entityId);
+      setReminders((prev) => prev.filter((x) => x.id !== r.id));
     } catch (e) {
-      alert((e as Error).message || "Could not mark reminder done.");
+      alert((e as Error).message || "Could not update reminder.");
     } finally {
       setMarkingReminderKey("");
     }
@@ -145,7 +160,7 @@ export default function Dashboard() {
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {reminders.map((r, i) => (
               <li
-                key={`${r.entityType}-${r.entityId}-${r.date}-${i}`}
+                key={r.id}
                 style={{
                   padding: "12px 0",
                   borderBottom: i < reminders.length - 1 ? "1px solid var(--border)" : undefined,
@@ -159,22 +174,41 @@ export default function Dashboard() {
                   <div style={{ color: "var(--muted)", marginTop: 4 }}>—</div>
                 )}
                 <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-sm"
-                    onClick={() =>
-                      navigate(r.entityType === "property" ? `/properties/${r.entityId}` : `/loans/${r.entityId}`)
-                    }
-                  >
-                    Open {r.entityType === "property" ? "property" : "loan"}
-                  </button>
+                  {(r.entityType === "property" || r.source === "legacy-property") && r.entityId && (
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => navigate(`/properties/${r.entityId}`)}>
+                      Open property
+                    </button>
+                  )}
+                  {(r.entityType === "loan" || r.source === "legacy-loan") && r.entityId && (
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => navigate(`/loans/${r.entityId}`)}>
+                      Open loan
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
-                    onClick={() => void handleMarkDone(r)}
-                    disabled={markingReminderKey === `${r.entityType}:${r.entityId}`}
+                    onClick={() => void handleReminder(r, "done")}
+                    disabled={markingReminderKey.startsWith(r.id)}
                   >
-                    {markingReminderKey === `${r.entityType}:${r.entityId}` ? "Saving..." : "Mark Done"}
+                    Mark complete
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={() => void handleReminder(r, "dismiss")}
+                    disabled={markingReminderKey.startsWith(r.id)}
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-danger btn-sm"
+                    onClick={() => {
+                      if (window.confirm("Delete this reminder?")) void handleReminder(r, "delete");
+                    }}
+                    disabled={markingReminderKey.startsWith(r.id)}
+                  >
+                    Delete
                   </button>
                 </div>
               </li>

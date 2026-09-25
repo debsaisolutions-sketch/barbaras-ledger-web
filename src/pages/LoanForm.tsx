@@ -92,6 +92,7 @@ export default function LoanForm() {
       reminderNote,
       reminderCompleted: false,
       reminderCompletedAt: "",
+      reminderDismissed: false,
     };
     try {
       setSaving(true);

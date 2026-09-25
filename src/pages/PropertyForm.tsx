@@ -2,6 +2,11 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getProperty, addProperty, updateProperty, type PropertyStatus } from "../store";
 import { useRefresh } from "../App";
+import {
+  RENT_FREQUENCY_OPTIONS,
+  propertySaveError,
+  type RentFrequency,
+} from "../rentSchedule";
 
 export default function PropertyForm() {
   const { id } = useParams<{ id: string }>();
@@ -17,7 +22,19 @@ export default function PropertyForm() {
     tenantPhone: "",
     tenantEmail: "",
     monthlyRent: "",
+    rentFrequency: "monthly" as RentFrequency,
+    rentAnchorDate: "",
+    rentIntervalDays: "",
     rentDueDay: "1",
+    loanPaidOff: "yes",
+    lender: "",
+    originalLoanAmount: "",
+    remainingLoanBalance: "",
+    loanPaymentAmount: "",
+    loanPaymentFrequency: "",
+    loanPaymentDue: "",
+    loanInterestRate: "",
+    loanNotes: "",
     leaseStartDate: "",
     leaseEndDate: "",
     securityDeposit: "",
@@ -50,7 +67,19 @@ export default function PropertyForm() {
           tenantPhone: p.tenantPhone,
           tenantEmail: p.tenantEmail,
           monthlyRent: p.monthlyRent.toString(),
+          rentFrequency: p.rentFrequency,
+          rentAnchorDate: p.rentAnchorDate,
+          rentIntervalDays: p.rentIntervalDays != null ? String(p.rentIntervalDays) : "",
           rentDueDay: p.rentDueDay.toString(),
+          loanPaidOff: p.loanPaidOff ? "yes" : "no",
+          lender: p.lender,
+          originalLoanAmount: p.originalLoanAmount != null ? String(p.originalLoanAmount) : "",
+          remainingLoanBalance: p.remainingLoanBalance != null ? String(p.remainingLoanBalance) : "",
+          loanPaymentAmount: p.loanPaymentAmount != null ? String(p.loanPaymentAmount) : "",
+          loanPaymentFrequency: p.loanPaymentFrequency,
+          loanPaymentDue: p.loanPaymentDue,
+          loanInterestRate: p.loanInterestRate != null ? String(p.loanInterestRate) : "",
+          loanNotes: p.loanNotes,
           leaseStartDate: p.leaseStartDate,
           leaseEndDate: p.leaseEndDate,
           securityDeposit: p.securityDeposit.toString(),
@@ -79,10 +108,21 @@ export default function PropertyForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.propertyName.trim()) {
-      alert("Property name is required.");
+    const saveError = propertySaveError({
+      propertyName: form.propertyName,
+      frequency: form.rentFrequency,
+      rentIntervalDays: form.rentIntervalDays,
+    });
+    if (saveError) {
+      alert(saveError);
       return;
     }
+    const optionalAmount = (raw: string) => {
+      const t = raw.trim();
+      if (!t) return null;
+      const n = parseFloat(t);
+      return Number.isFinite(n) ? n : null;
+    };
     const salePriceNum =
       form.salePrice.trim() === "" ? null : parseFloat(form.salePrice);
     const reminderDate = form.nextReminderDate;
@@ -98,7 +138,20 @@ export default function PropertyForm() {
       tenantPhone: form.tenantPhone.trim(),
       tenantEmail: form.tenantEmail.trim(),
       monthlyRent: parseFloat(form.monthlyRent) || 0,
+      rentFrequency: form.rentFrequency,
+      rentAnchorDate: form.rentAnchorDate,
+      rentIntervalDays: form.rentIntervalDays.trim() ? parseInt(form.rentIntervalDays, 10) || null : null,
       rentDueDay: parseInt(form.rentDueDay) || 1,
+      loanPaidOff: form.loanPaidOff !== "no",
+      lender: form.lender.trim(),
+      originalLoanAmount: optionalAmount(form.originalLoanAmount),
+      remainingLoanBalance: optionalAmount(form.remainingLoanBalance),
+      loanPaymentAmount: optionalAmount(form.loanPaymentAmount),
+      loanPaymentFrequency: form.loanPaymentFrequency.trim(),
+      loanPaymentDue: form.loanPaymentDue.trim(),
+      loanInterestRate: optionalAmount(form.loanInterestRate),
+      loanNotes: form.loanNotes.trim(),
+      reminderDismissed: false,
       leaseStartDate: form.leaseStartDate,
       leaseEndDate: form.leaseEndDate,
       securityDeposit: parseFloat(form.securityDeposit) || 0,
@@ -198,16 +251,35 @@ export default function PropertyForm() {
           </div>
           <div className="form-row">
             <div className="form-group">
-              <label>Monthly Rent ($)</label>
+              <label>Expected rent each period ($)</label>
               <input
                 type="number"
                 step="0.01"
                 value={form.monthlyRent}
                 onChange={(e) => set("monthlyRent", e.target.value)}
+                placeholder="Leave blank if unknown"
               />
             </div>
             <div className="form-group">
-              <label>Rent Due Day</label>
+              <label>How often rent is expected</label>
+              <select
+                value={form.rentFrequency}
+                onChange={(e) => set("rentFrequency", e.target.value)}
+              >
+                {RENT_FREQUENCY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <p style={{ color: "var(--muted)", fontSize: 14, marginTop: -8 }}>
+            This sets the expected schedule. You can still record a payment on any date, for any amount.
+          </p>
+          {form.rentFrequency === "monthly" ? (
+            <div className="form-group">
+              <label>Rent due day of the month</label>
               <input
                 type="number"
                 min={1}
@@ -216,7 +288,30 @@ export default function PropertyForm() {
                 onChange={(e) => set("rentDueDay", e.target.value)}
               />
             </div>
-          </div>
+          ) : (
+            <div className="form-row">
+              <div className="form-group">
+                <label>First period starts</label>
+                <input
+                  type="date"
+                  value={form.rentAnchorDate}
+                  onChange={(e) => set("rentAnchorDate", e.target.value)}
+                />
+              </div>
+              {form.rentFrequency === "custom" && (
+                <div className="form-group">
+                  <label>Repeat every (days)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={form.rentIntervalDays}
+                    onChange={(e) => set("rentIntervalDays", e.target.value)}
+                    placeholder="30"
+                  />
+                </div>
+              )}
+            </div>
+          )}
           <div className="form-row">
             <div className="form-group">
               <label>Lease Start Date</label>
@@ -307,6 +402,95 @@ export default function PropertyForm() {
             Use reminders for things you need to check or follow up on, like checking your bank
             account for a direct deposit.
           </p>
+          <details open={form.loanPaidOff === "no" ? true : undefined} style={{ marginBottom: 16 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 700, marginBottom: 12 }}>
+              Loan or mortgage (optional)
+            </summary>
+            <div className="form-group">
+              <label>Paid off?</label>
+              <select value={form.loanPaidOff} onChange={(e) => set("loanPaidOff", e.target.value)}>
+                <option value="yes">Yes — no loan, or it is paid off</option>
+                <option value="no">No — there is still a loan</option>
+              </select>
+            </div>
+            {form.loanPaidOff === "no" && (
+              <>
+                <p style={{ color: "var(--muted)", fontSize: 14 }}>
+                  Fill in only what you know. Do not enter a full bank account number.
+                </p>
+                <div className="form-group">
+                  <label>Lender</label>
+                  <input value={form.lender} onChange={(e) => set("lender", e.target.value)} />
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Original loan amount</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={form.originalLoanAmount}
+                      onChange={(e) => set("originalLoanAmount", e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Remaining balance</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={form.remainingLoanBalance}
+                      onChange={(e) => set("remainingLoanBalance", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Regular payment</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={form.loanPaymentAmount}
+                      onChange={(e) => set("loanPaymentAmount", e.target.value)}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Payment frequency</label>
+                    <input
+                      value={form.loanPaymentFrequency}
+                      onChange={(e) => set("loanPaymentFrequency", e.target.value)}
+                      placeholder="Monthly"
+                    />
+                  </div>
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label>Payment due</label>
+                    <input
+                      value={form.loanPaymentDue}
+                      onChange={(e) => set("loanPaymentDue", e.target.value)}
+                      placeholder="1st of the month"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Interest rate (%)</label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      value={form.loanInterestRate}
+                      onChange={(e) => set("loanInterestRate", e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>Loan notes</label>
+                  <textarea
+                    value={form.loanNotes}
+                    onChange={(e) => set("loanNotes", e.target.value)}
+                    style={{ minHeight: 72 }}
+                  />
+                </div>
+              </>
+            )}
+          </details>
           <div className="form-group">
             <label>Notes</label>
             <textarea

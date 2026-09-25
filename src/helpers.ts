@@ -13,7 +13,18 @@ export function statusBadge(status: string): string {
     case "Closed": case "Written Off": return "badge-closed";
     case "Sold": return "badge-sold";
     case "Vacant": return "badge-vacant";
-    case "Paid Off": return "badge-paid";
+    case "Paid Off":
+    case "Paid":
+    case "Completed": return "badge-paid";
+    case "Partial":
+    case "Waiting on Funds":
+    case "Planned":
+    case "Scheduled": return "badge-partial";
+    case "Unpaid":
+    case "Needs Attention": return "badge-unpaid";
+    case "Overdue":
+    case "In Progress": return "badge-overdue";
+    case "Overpaid": return "badge-overpaid";
     default: return "";
   }
 }
