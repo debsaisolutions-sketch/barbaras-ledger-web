@@ -21,6 +21,7 @@ export function statusBadge(status: string): string {
     case "Planned":
     case "Scheduled": return "badge-partial";
     case "Unpaid":
+    case "Upcoming":
     case "Needs Attention": return "badge-unpaid";
     case "Overdue":
     case "In Progress": return "badge-overdue";

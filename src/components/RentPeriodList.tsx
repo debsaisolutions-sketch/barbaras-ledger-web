@@ -86,8 +86,8 @@ function PeriodCard({
           <p>{fmtCurrency(period.received)}</p>
         </div>
         <div className="detail-info-item">
-          <label>Remaining</label>
-          <p>{fmtCurrency(period.remaining)}</p>
+          <label>{period.status === "Upcoming" ? "Not due yet" : "Remaining"}</label>
+          <p>{period.status === "Upcoming" ? "Later" : fmtCurrency(period.remaining)}</p>
         </div>
       </div>
       {rows.length > 0 && (

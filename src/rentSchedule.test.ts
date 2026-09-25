@@ -227,6 +227,67 @@ describe("existing ledger records", () => {
     expect(due).toBe(600);
   });
 
+  it("starts a two-week schedule on payday and keeps the other share still due", () => {
+    const schedule: RentScheduleInput = {
+      frequency: "biweekly",
+      expectedAmount: 400,
+      dueDay: 1,
+      anchorDate: "2026-09-23",
+      intervalDays: null,
+      leaseStart: "2026-09-11",
+    };
+    const periods = summarizeVisiblePeriods(
+      schedule,
+      [
+        pay({
+          id: "chris",
+          date: "2026-09-23",
+          amount: 300,
+          rentPeriodStart: "2026-09-23",
+          rentPeriodEnd: "2026-10-06",
+        }),
+      ],
+      "2026-09-25"
+    );
+    expect(periods.some((p) => p.end < "2026-09-23")).toBe(false);
+    const current = periods.find((p) => p.start === "2026-09-23");
+    expect(current?.received).toBe(300);
+    expect(current?.remaining).toBe(100);
+    expect(current?.status).toBe("Partial");
+    const upcoming = periods.find((p) => p.start === "2026-10-07");
+    expect(upcoming?.status).toBe("Upcoming");
+    expect(
+      unpaidForDashboard({
+        schedule,
+        today: "2026-09-25",
+        transactions: [
+          {
+            id: "old",
+            type: "charge",
+            applyTo: "Rent",
+            date: "2026-09-24",
+            chargeAmount: 1000,
+            paymentAmount: 0,
+            rentPeriodStart: "",
+            rentPeriodEnd: "",
+            voidedAt: "2026-09-25T00:00:00Z",
+          },
+          {
+            id: "chris",
+            type: "payment",
+            applyTo: "Rent",
+            date: "2026-09-23",
+            chargeAmount: 0,
+            paymentAmount: 300,
+            rentPeriodStart: "2026-09-23",
+            rentPeriodEnd: "2026-10-06",
+            voidedAt: "",
+          },
+        ],
+      })
+    ).toBe(100);
+  });
+
   it("uses the current rent period when there is no charge history", () => {
     const due = unpaidForDashboard({
       schedule: monthly,

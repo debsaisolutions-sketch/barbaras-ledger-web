@@ -2,7 +2,7 @@
 
 export type RentFrequency = "weekly" | "biweekly" | "monthly" | "custom";
 
-export type RentPeriodStatus = "Paid" | "Partial" | "Unpaid" | "Overdue" | "Overpaid";
+export type RentPeriodStatus = "Paid" | "Partial" | "Unpaid" | "Overdue" | "Overpaid" | "Upcoming";
 
 export const REPAIR_STATUSES = [
   "Needs Attention",
@@ -132,13 +132,15 @@ export function rentPeriodStatus(
   expected: number,
   received: number,
   periodEnd: string,
-  today: string
+  today: string,
+  periodStart = ""
 ): RentPeriodStatus {
   const exp = money(expected);
   const rec = money(received);
   if (rec > exp + 0.009) return "Overpaid";
   if (exp > 0 && rec + 0.009 >= exp) return "Paid";
   if (rec > 0.009) return "Partial";
+  if (periodStart && today < periodStart) return "Upcoming";
   if (today > periodEnd) return "Overdue";
   return "Unpaid";
 }
@@ -294,7 +296,7 @@ export function summarizePeriod(
     ...period,
     received,
     remaining: remainingRent(period.expected, received),
-    status: rentPeriodStatus(period.expected, received, period.end, today),
+    status: rentPeriodStatus(period.expected, received, period.end, today, period.start),
     paymentIds: matched.map((p) => p.id),
   };
 }
@@ -339,7 +341,10 @@ export function visibleRentPeriods(
     if (isIsoDate(payment.date)) add(periodForDate(schedule, payment.date, today));
   }
 
-  return [...map.values()].sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
+  const anchor = schedule.frequency === "monthly" ? "" : resolveAnchor(schedule, today);
+  return [...map.values()]
+    .filter((period) => !anchor || period.end >= anchor)
+    .sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
 }
 
 export function summarizeVisiblePeriods(

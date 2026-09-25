@@ -28,6 +28,7 @@ import {
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
 import { useRefresh } from "../App";
 import { downloadDocumentFile, openDocumentInNewTab } from "../documentFiles";
+import { unpaidForDashboard } from "../rentSchedule";
 import RentPeriodList from "../components/RentPeriodList";
 import RepairsPanel from "../components/RepairsPanel";
 import RemindersPanel from "../components/RemindersPanel";
@@ -70,7 +71,31 @@ export default function PropertyDetail() {
   const [txnBusy, setTxnBusy] = useState(false);
   const [docToDelete, setDocToDelete] = useState<Doc | null>(null);
   const [docBusy, setDocBusy] = useState(false);
-  const balance = txns.length > 0 ? txns[txns.length - 1].runningBalance : 0;
+  const today = new Date().toISOString().split("T")[0];
+  const balance = property
+    ? unpaidForDashboard({
+        schedule: {
+          frequency: property.rentFrequency,
+          expectedAmount: property.monthlyRent,
+          dueDay: property.rentDueDay,
+          anchorDate: property.rentAnchorDate,
+          intervalDays: property.rentIntervalDays,
+          leaseStart: property.leaseStartDate,
+        },
+        transactions: txns.map((t) => ({
+          id: t.id,
+          type: t.type,
+          applyTo: t.applyTo,
+          date: t.date,
+          chargeAmount: t.chargeAmount,
+          paymentAmount: t.paymentAmount,
+          rentPeriodStart: t.rentPeriodStart,
+          rentPeriodEnd: t.rentPeriodEnd,
+          voidedAt: t.voidedAt,
+        })),
+        today,
+      })
+    : 0;
   const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
 
   const canRecordPayments =
