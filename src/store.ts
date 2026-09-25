@@ -25,6 +25,7 @@ export const PAYMENT_METHOD_OPTIONS = [
   "Zelle",
   "Venmo",
   "Cash App",
+  "Chime",
   "Other",
 ] as const;
 export type PaymentMethod = (typeof PAYMENT_METHOD_OPTIONS)[number] | "";
