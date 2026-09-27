@@ -122,30 +122,33 @@ export async function sendContract(opts: {
 export async function sendHtmlContract(opts: {
   name: string;
   text: string;
-  signerName: string;
-  signerEmail: string;
+  signers: { name: string; email: string }[];
 }): Promise<DocuSealResult<{ submissionId: string }>> {
   if (!apiKey()) return { ok: false, status: 500, error: "DocuSeal is not configured yet." };
+  const parties = opts.signers.map((signer, index) => ({
+    name: signer.name,
+    email: signer.email,
+    role: opts.signers.length === 1 ? "Signer" : `Tenant ${index + 1}`,
+  }));
   const res = await docuseal("/submissions/html", {
     method: "POST",
     body: JSON.stringify({
       name: opts.name,
       send_email: true,
+      order: parties.length > 1 ? "random" : "preserved",
       expire_at: expireAt(30),
       documents: [
         {
           name: opts.name,
-          html: signingHtmlFromText(opts.text),
+          html: signingHtmlFromText(opts.text, parties),
           size: "Letter",
         },
       ],
-      submitters: [
-        {
-          role: "Signer",
-          name: opts.signerName,
-          email: opts.signerEmail,
-        },
-      ],
+      submitters: parties.map((signer) => ({
+        role: signer.role,
+        name: signer.name,
+        email: signer.email,
+      })),
     }),
   });
   if (!res.ok) return { ok: false, status: res.status, error: "DocuSeal could not send this contract." };

@@ -22,6 +22,9 @@ export default function PropertyForm() {
     tenantContact: "",
     tenantPhone: "",
     tenantEmail: "",
+    coTenantName: "",
+    coTenantEmail: "",
+    coTenantPhone: "",
     monthlyRent: "",
     rentFrequency: "monthly" as RentFrequency,
     rentAnchorDate: "",
@@ -68,6 +71,9 @@ export default function PropertyForm() {
           tenantContact: p.tenantContact,
           tenantPhone: p.tenantPhone,
           tenantEmail: p.tenantEmail,
+          coTenantName: p.coTenantName,
+          coTenantEmail: p.coTenantEmail,
+          coTenantPhone: p.coTenantPhone,
           monthlyRent: p.monthlyRent.toString(),
           rentFrequency: p.rentFrequency,
           rentAnchorDate: p.rentAnchorDate,
@@ -140,6 +146,9 @@ export default function PropertyForm() {
       tenantContact: form.tenantContact.trim(),
       tenantPhone: form.tenantPhone.trim(),
       tenantEmail: form.tenantEmail.trim(),
+      coTenantName: form.coTenantName.trim(),
+      coTenantEmail: form.coTenantEmail.trim(),
+      coTenantPhone: form.coTenantPhone.trim(),
       monthlyRent: parseFloat(form.monthlyRent) || 0,
       rentFrequency: form.rentFrequency,
       rentAnchorDate: form.rentAnchorDate,
@@ -225,11 +234,47 @@ export default function PropertyForm() {
               placeholder="Full address"
             />
           </div>
+          <h3 style={{ marginTop: 8 }}>People on the lease</h3>
+          <p style={{ color: "var(--muted)", fontSize: 14, marginTop: 0 }}>
+            Use both when two adults live here, including when they are not married. Contracts fill in each name, phone, and email.
+          </p>
           <div className="form-row">
             <div className="form-group">
-              <label>Tenant Name</label>
+              <label>First tenant name</label>
               <input value={form.tenantName} onChange={(e) => set("tenantName", e.target.value)} />
             </div>
+            <div className="form-group">
+              <label>First tenant phone</label>
+              <input value={form.tenantPhone} onChange={(e) => set("tenantPhone", e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>First tenant email</label>
+              <input
+                type="email"
+                value={form.tenantEmail}
+                onChange={(e) => set("tenantEmail", e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label>Second tenant name</label>
+              <input value={form.coTenantName} onChange={(e) => set("coTenantName", e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>Second tenant phone</label>
+              <input value={form.coTenantPhone} onChange={(e) => set("coTenantPhone", e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label>Second tenant email</label>
+              <input
+                type="email"
+                value={form.coTenantEmail}
+                onChange={(e) => set("coTenantEmail", e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="form-row">
             <div className="form-group">
               <label>Previous tenant</label>
               <input
@@ -242,21 +287,7 @@ export default function PropertyForm() {
               </p>
             </div>
             <div className="form-group">
-              <label>Tenant Phone</label>
-              <input value={form.tenantPhone} onChange={(e) => set("tenantPhone", e.target.value)} />
-            </div>
-          </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label>Tenant Email</label>
-              <input
-                type="email"
-                value={form.tenantEmail}
-                onChange={(e) => set("tenantEmail", e.target.value)}
-              />
-            </div>
-            <div className="form-group">
-              <label>Tenant Contact Info</label>
+              <label>Other contact info</label>
               <input
                 value={form.tenantContact}
                 onChange={(e) => set("tenantContact", e.target.value)}

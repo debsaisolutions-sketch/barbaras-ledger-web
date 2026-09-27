@@ -15,6 +15,7 @@ import {
   type Loan,
 } from "../store";
 import { fmtCurrency, fmtDate } from "../helpers";
+import { occupantLabel } from "../occupants";
 
 export default function Reports() {
   const currentYear = new Date().getFullYear();
@@ -152,7 +153,7 @@ export default function Reports() {
               {propReports.map(r => (
                 <div key={r.property.id} className="card" style={{ marginBottom: 16 }}>
                   <h4 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{r.property.propertyName}</h4>
-                  <div style={{ fontSize: 14, color: "var(--muted)", marginBottom: 12 }}>{r.property.address} · Tenant: {r.property.tenantName || "—"}</div>
+                  <div style={{ fontSize: 14, color: "var(--muted)", marginBottom: 12 }}>{r.property.address} · Tenant: {occupantLabel(r.property) || "—"}</div>
                   <div style={{ fontSize: 15, marginBottom: 12, lineHeight: 1.6 }}>
                     <strong>Status:</strong> {r.property.status}
                     {r.property.status === "Sold" && (

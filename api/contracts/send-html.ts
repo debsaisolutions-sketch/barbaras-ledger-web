@@ -4,7 +4,7 @@ import { userIdFromAuthorization } from "../../lib/server/ledgerAuth.js";
 type Req = {
   method?: string;
   headers: Record<string, string | string[] | undefined>;
-  body?: { name?: string; text?: string; signerName?: string; signerEmail?: string };
+  body?: { name?: string; text?: string; signers?: { name?: string; email?: string }[] };
 };
 type Res = { status: (code: number) => { json: (body: unknown) => void } };
 
@@ -30,8 +30,9 @@ export default async function handler(req: Req, res: Res): Promise<void> {
 
   const name = req.body?.name?.trim() || "";
   const text = req.body?.text?.trim() || "";
-  const signerName = req.body?.signerName?.trim() || "";
-  const signerEmail = req.body?.signerEmail?.trim() || "";
+  const signers = (req.body?.signers || [])
+    .map((signer) => ({ name: signer.name?.trim() || "", email: signer.email?.trim() || "" }))
+    .filter((signer) => signer.name || signer.email);
   if (!name) {
     res.status(400).json({ error: "Enter a document name." });
     return;
@@ -44,12 +45,12 @@ export default async function handler(req: Req, res: Res): Promise<void> {
     res.status(400).json({ error: "This document is too long to send." });
     return;
   }
-  if (!signerName || !isEmail(signerEmail)) {
-    res.status(400).json({ error: "Enter the signer's name and email." });
+  if (signers.length === 0 || signers.some((signer) => !signer.name || !isEmail(signer.email))) {
+    res.status(400).json({ error: "Enter a name and email for each person who should sign." });
     return;
   }
 
-  const sent = await sendHtmlContract({ name, text, signerName, signerEmail });
+  const sent = await sendHtmlContract({ name, text, signers });
   if (!sent.ok) {
     res.status(sent.status).json({ error: sent.error });
     return;

@@ -11,6 +11,7 @@ import {
 } from "../store";
 import { summarizeVisiblePeriods } from "../rentSchedule";
 import { fmtCurrency, fmtDate } from "../helpers";
+import { occupantLabel } from "../occupants";
 import { useRefresh } from "../App";
 
 export default function AddRentalPayment() {
@@ -146,7 +147,7 @@ export default function AddRentalPayment() {
                 <option value="">Select a property...</option>
                 {properties.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.propertyName} — {p.tenantName}
+                    {p.propertyName} — {occupantLabel(p) || "No tenant"}
                   </option>
                 ))}
               </select>
@@ -175,7 +176,7 @@ export default function AddRentalPayment() {
           {selected && (
             <div className="form-group">
               <label>Tenant</label>
-              <input value={selected.tenantName || "No tenant name saved"} readOnly />
+              <input value={occupantLabel(selected) || "No tenant name saved"} readOnly />
             </div>
           )}
           {form.applyTo === "Rent" && selected && selected.monthlyRent > 0 && periods.length > 0 && (

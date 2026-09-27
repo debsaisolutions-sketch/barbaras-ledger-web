@@ -8,6 +8,7 @@ import {
   type ContractTemplateOption,
 } from "../contractApi";
 import { insertContractSend, listContractSends, markContractSigned, type ContractSend } from "../contractSends";
+import { leaseOccupants } from "../occupants";
 import { fmtDate } from "../helpers";
 
 export default function ContractPanel({
@@ -33,6 +34,19 @@ export default function ContractPanel({
     void loadSends().catch((err) => setError((err as Error).message));
   }, [property.id]);
 
+  const people = leaseOccupants(property);
+
+  function signersFor(roles: string[]) {
+    return roles.map((role, index) => ({
+      role,
+      name:
+        roles.length === 1 && index === 0
+          ? people.map((person) => person.name).filter(Boolean).join(" and ")
+          : people[index]?.name || "",
+      email: people[index]?.email || "",
+    }));
+  }
+
   const selected = templates.find((template) => template.id === templateId);
 
   async function openSend() {
@@ -44,13 +58,7 @@ export default function ContractPanel({
       setTemplates(list);
       const first = list[0];
       setTemplateId(first?.id ?? "");
-      setSigners(
-        (first?.roles || ["First Party"]).map((role, index) => ({
-          role,
-          name: index === 0 ? property.tenantName : "",
-          email: "",
-        }))
-      );
+      setSigners(signersFor(first?.roles || ["First Party"]));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -61,12 +69,12 @@ export default function ContractPanel({
   function chooseTemplate(id: number) {
     const template = templates.find((row) => row.id === id);
     setTemplateId(id);
+    const next = signersFor(template?.roles || ["First Party"]);
     setSigners(
-      (template?.roles || ["First Party"]).map((role, index) => ({
-        role,
-        name: index === 0 ? property.tenantName : signers.find((row) => row.role === role)?.name || "",
-        email: signers.find((row) => row.role === role)?.email || "",
-      }))
+      next.map((row) => {
+        const typed = signers.find((current) => current.role === row.role);
+        return typed?.email ? { ...row, email: typed.email, name: typed.name || row.name } : row;
+      })
     );
   }
 

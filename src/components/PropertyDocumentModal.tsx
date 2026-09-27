@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import mammoth from "mammoth";
 import { BUILTIN_TEMPLATES } from "../builtinTemplates";
+import { fillContractFromOccupants, leaseOccupants } from "../occupants";
 import { sendEditedContract } from "../contractApi";
 import { insertContractSend } from "../contractSends";
 import {
@@ -29,16 +30,17 @@ function typeFromName(name: string, current: DocumentType): DocumentType {
 }
 
 function withPropertyDetails(text: string, property: Property): string {
-  let next = text;
-  if (property.tenantName.trim()) {
-    next = next.replace(/TENANT:\s*_+/, `TENANT: ${property.tenantName.trim()}`);
-    next = next.replace(/BORROWER:\s*_+/, `BORROWER: ${property.tenantName.trim()}`);
-    next = next.replace(/RECEIVED FROM:\s*_+/, `RECEIVED FROM: ${property.tenantName.trim()}`);
-  }
+  let next = fillContractFromOccupants(text, property);
   if (property.address.trim()) {
     next = next.replace(/PROPERTY ADDRESS:\s*_+/, `PROPERTY ADDRESS: ${property.address.trim()}`);
   }
   return next;
+}
+
+function startingSigners(property: Property): { name: string; email: string }[] {
+  const people = leaseOccupants(property).filter((person) => person.name || person.email);
+  if (people.length === 0) return [{ name: "", email: "" }];
+  return people.map((person) => ({ name: person.name, email: person.email }));
 }
 
 async function textFromSaved(doc: Document): Promise<string> {
@@ -79,8 +81,7 @@ export default function PropertyDocumentModal({
   const [notes, setNotes] = useState("");
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [signerName, setSignerName] = useState(property.tenantName);
-  const [signerEmail, setSignerEmail] = useState("");
+  const [signers, setSigners] = useState(() => startingSigners(property));
   const [loadingSource, setLoadingSource] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -170,8 +171,9 @@ export default function PropertyDocumentModal({
       setError("Pull in a document and check the wording before sending.");
       return;
     }
-    if (!signerName.trim() || !signerEmail.trim()) {
-      setError("Enter the signer's name and email.");
+    const ready = signers.map((signer) => ({ name: signer.name.trim(), email: signer.email.trim() })).filter((signer) => signer.name || signer.email);
+    if (ready.length === 0 || ready.some((signer) => !signer.name || !signer.email.includes("@"))) {
+      setError("Enter a name and email for each person who should sign.");
       return;
     }
     setBusy(true);
@@ -180,8 +182,7 @@ export default function PropertyDocumentModal({
       const submissionId = await sendEditedContract({
         name: name.trim(),
         text,
-        signerName: signerName.trim(),
-        signerEmail: signerEmail.trim(),
+        signers: ready,
       });
       const copy = new File([text], `${name.trim()}.txt`, { type: "text/plain" });
       await addDocumentWithFile(copy, {
@@ -189,19 +190,19 @@ export default function PropertyDocumentModal({
         documentType: type === "Other" ? "Rental Agreement" : type,
         relatedType: "property",
         relatedId: property.id,
-        notes: `Sent to ${signerEmail.trim()} to sign. ${notes.trim()}`.trim(),
+        notes: `Sent to ${ready.map((signer) => signer.email).join(", ")} to sign. ${notes.trim()}`.trim(),
       });
       await insertContractSend({
         propertyId: property.id,
         templateId: sourceKey || "edited",
         templateName: name.trim(),
-        signerName: signerName.trim(),
-        signerEmail: signerEmail.trim(),
+        signerName: ready.map((signer) => signer.name).join(", "),
+        signerEmail: ready.map((signer) => signer.email).join(", "),
         submissionId,
       });
       onSaved();
       onClose();
-      alert(`Sent to ${signerEmail.trim()}. They will get an email from DocuSeal to sign. After they sign, use Save signed copy on this property.`);
+      alert(`Sent to ${ready.map((signer) => signer.email).join(" and ")}. They will each get an email from DocuSeal to sign. After they sign, use Save signed copy on this property.`);
     } catch (err) {
       setError((err as Error).message || "Could not send this contract.");
     } finally {
@@ -278,18 +279,29 @@ export default function PropertyDocumentModal({
                     : "Change anything you need. Word layout is simplified so the wording can be edited. DocuSeal emails this to the signer."}
                 </p>
               </div>
-              <div className="form-group">
-                <label>Signer name</label>
-                <input value={signerName} onChange={(event) => setSignerName(event.target.value)} />
-              </div>
-              <div className="form-group">
-                <label>Signer email</label>
-                <input
-                  type="email"
-                  value={signerEmail}
-                  onChange={(event) => setSignerEmail(event.target.value)}
-                />
-              </div>
+              {signers.map((signer, index) => (
+                <div key={index}>
+                  <div className="form-group">
+                    <label>{signers.length > 1 ? `Signer ${index + 1} name` : "Signer name"}</label>
+                    <input
+                      value={signer.name}
+                      onChange={(event) =>
+                        setSigners((rows) => rows.map((row, i) => (i === index ? { ...row, name: event.target.value } : row)))
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>{signers.length > 1 ? `Signer ${index + 1} email` : "Signer email"}</label>
+                    <input
+                      type="email"
+                      value={signer.email}
+                      onChange={(event) =>
+                        setSigners((rows) => rows.map((row, i) => (i === index ? { ...row, email: event.target.value } : row)))
+                      }
+                    />
+                  </div>
+                </div>
+              ))}
             </>
           ) : (
             <>

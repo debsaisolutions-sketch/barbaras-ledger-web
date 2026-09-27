@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { searchAll, type Document } from "../store";
 import { fmtCurrency, fmtDate } from "../helpers";
+import { occupantLabel } from "../occupants";
 import { openDocumentInNewTab } from "../documentFiles";
 
 type SearchResults = Awaited<ReturnType<typeof searchAll>>;
@@ -103,7 +104,7 @@ export default function SearchPage() {
                   <div className="item-content">
                     <div className="item-title">{p.propertyName}</div>
                     <div className="item-subtitle">
-                      {p.address || "—"} · Tenant: {p.tenantName || "—"}
+                      {p.address || "—"} · Tenant: {occupantLabel(p) || "—"}
                     </div>
                   </div>
                   <button className="btn btn-outline btn-sm" onClick={() => navigate(`/properties/${p.id}`)}>

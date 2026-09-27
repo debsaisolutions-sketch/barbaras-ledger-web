@@ -7,6 +7,7 @@ import {
   type Property,
 } from "../store";
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
+import { occupantLabel } from "../occupants";
 import { useRefresh } from "../App";
 
 export default function Properties() {
@@ -46,7 +47,7 @@ export default function Properties() {
     .filter(
       (p) =>
         !search ||
-        [p.propertyName, p.tenantName, p.address].some((f) =>
+        [p.propertyName, p.tenantName, p.coTenantName, p.address].some((f) =>
           f?.toLowerCase().includes(search.toLowerCase())
         )
     );
@@ -114,7 +115,7 @@ export default function Properties() {
             <div className="item-content">
               <div className="item-title">{p.propertyName}</div>
               <div className="item-subtitle">
-                {p.tenantName || "No tenant"} · {p.address}
+                {occupantLabel(p) || "No tenant"} · {p.address}
                 {p.status === "Sold" && (p.salePrice != null || p.soldDate) ? (
                   <>
                     {" "}

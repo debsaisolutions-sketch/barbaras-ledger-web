@@ -97,6 +97,9 @@ export interface Property {
   tenantContact: string;
   tenantPhone: string;
   tenantEmail: string;
+  coTenantName: string;
+  coTenantEmail: string;
+  coTenantPhone: string;
   monthlyRent: number;
   rentDueDay: number;
   leaseStartDate: string;
@@ -331,6 +334,9 @@ function mapProperty(row: Record<string, unknown>): Property {
     tenantContact: String(row.tenant_contact ?? ""),
     tenantPhone: String(row.tenant_phone ?? ""),
     tenantEmail: String(row.tenant_email ?? ""),
+    coTenantName: String(row.co_tenant_name ?? ""),
+    coTenantEmail: String(row.co_tenant_email ?? ""),
+    coTenantPhone: String(row.co_tenant_phone ?? ""),
     monthlyRent: num(row.monthly_rent),
     rentDueDay: Math.round(num(row.rent_due_day)) || 1,
     leaseStartDate: dateStr(row.lease_start_date),
@@ -675,6 +681,9 @@ export async function addProperty(
     tenant_contact: data.tenantContact,
     tenant_phone: data.tenantPhone,
     tenant_email: data.tenantEmail,
+    co_tenant_name: data.coTenantName ?? "",
+    co_tenant_email: data.coTenantEmail ?? "",
+    co_tenant_phone: data.coTenantPhone ?? "",
     monthly_rent: data.monthlyRent,
     rent_due_day: data.rentDueDay,
     lease_start_date: data.leaseStartDate || null,
@@ -722,6 +731,9 @@ export async function updateProperty(id: string, data: Partial<Property>): Promi
   if (data.tenantContact !== undefined) patch.tenant_contact = data.tenantContact;
   if (data.tenantPhone !== undefined) patch.tenant_phone = data.tenantPhone;
   if (data.tenantEmail !== undefined) patch.tenant_email = data.tenantEmail;
+  if (data.coTenantName !== undefined) patch.co_tenant_name = data.coTenantName;
+  if (data.coTenantEmail !== undefined) patch.co_tenant_email = data.coTenantEmail;
+  if (data.coTenantPhone !== undefined) patch.co_tenant_phone = data.coTenantPhone;
   if (data.monthlyRent !== undefined) patch.monthly_rent = data.monthlyRent;
   if (data.rentDueDay !== undefined) patch.rent_due_day = data.rentDueDay;
   if (data.leaseStartDate !== undefined) patch.lease_start_date = data.leaseStartDate || null;
@@ -1709,7 +1721,7 @@ export async function searchAll(query: string) {
     };
   const allProperties = await getProperties();
   const properties = allProperties.filter((p) =>
-    [p.propertyName, p.address, p.tenantName, p.tenantContact, p.notes].some((f) =>
+    [p.propertyName, p.address, p.tenantName, p.coTenantName, p.tenantEmail, p.coTenantEmail, p.tenantContact, p.notes].some((f) =>
       f?.toLowerCase().includes(q)
     )
   );

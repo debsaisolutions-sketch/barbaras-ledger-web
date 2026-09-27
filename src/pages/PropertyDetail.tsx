@@ -24,6 +24,7 @@ import {
   type Reminder,
 } from "../store";
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
+import { occupantLabel } from "../occupants";
 import { useRefresh } from "../App";
 import { downloadDocumentFile, openDocumentInNewTab } from "../documentFiles";
 import { paidByPriorTenant, unpaidForDashboard } from "../rentSchedule";
@@ -410,9 +411,25 @@ export default function PropertyDetail() {
         )}
         <div className="detail-info-grid">
           <div className="detail-info-item">
-            <label>Tenant</label>
+            <label>First tenant</label>
             <p>{property.tenantName || "—"}</p>
+            {(property.tenantPhone || property.tenantEmail) && (
+              <p style={{ color: "var(--muted)", fontSize: 14 }}>
+                {[property.tenantPhone, property.tenantEmail].filter(Boolean).join(" · ")}
+              </p>
+            )}
           </div>
+          {(property.coTenantName || property.coTenantPhone || property.coTenantEmail) && (
+            <div className="detail-info-item">
+              <label>Second tenant</label>
+              <p>{property.coTenantName || "—"}</p>
+              {(property.coTenantPhone || property.coTenantEmail) && (
+                <p style={{ color: "var(--muted)", fontSize: 14 }}>
+                  {[property.coTenantPhone, property.coTenantEmail].filter(Boolean).join(" · ")}
+                </p>
+              )}
+            </div>
+          )}
           {property.priorTenantName ? (
             <div className="detail-info-item">
               <label>Previous tenant</label>
@@ -422,14 +439,6 @@ export default function PropertyDetail() {
               </p>
             </div>
           ) : null}
-          <div className="detail-info-item">
-            <label>Phone</label>
-            <p>{property.tenantPhone || "—"}</p>
-          </div>
-          <div className="detail-info-item">
-            <label>Email</label>
-            <p>{property.tenantEmail || "—"}</p>
-          </div>
           <div className="detail-info-item">
             <label>Expected rent</label>
             <p>
@@ -806,8 +815,8 @@ export default function PropertyDetail() {
         <div className="detail-info-grid">
           <div className="detail-info-item"><label>Property</label><p>{property.propertyName}</p></div>
           <div className="detail-info-item"><label>Address</label><p>{property.address || "—"}</p></div>
-          <div className="detail-info-item"><label>Tenant</label><p>{property.tenantName || "—"}</p></div>
-          <div className="detail-info-item"><label>Contact</label><p>{property.tenantContact || property.tenantPhone || "—"}</p></div>
+          <div className="detail-info-item"><label>Tenants</label><p>{occupantLabel(property) || "—"}</p></div>
+          <div className="detail-info-item"><label>Contact</label><p>{[property.tenantPhone, property.coTenantPhone, property.tenantEmail, property.coTenantEmail, property.tenantContact].filter(Boolean).join(" · ") || "—"}</p></div>
           <div className="detail-info-item"><label>Rent</label><p>{fmtCurrency(property.monthlyRent)}</p></div>
           <div className="detail-info-item"><label>Due day</label><p>{property.rentDueDay || "—"}</p></div>
           <div className="detail-info-item"><label>Status</label><p>{property.status}</p></div>
