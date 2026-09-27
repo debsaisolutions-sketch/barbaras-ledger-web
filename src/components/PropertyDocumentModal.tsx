@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import mammoth from "mammoth";
 import { BUILTIN_TEMPLATES } from "../builtinTemplates";
-import { fillContractFromOccupants, leaseOccupants } from "../occupants";
+import { fillContractFromProperty } from "../contractFill";
+import { leaseOccupants } from "../occupants";
 import { sendEditedContract } from "../contractApi";
 import { insertContractSend } from "../contractSends";
 import {
@@ -30,11 +31,7 @@ function typeFromName(name: string, current: DocumentType): DocumentType {
 }
 
 function withPropertyDetails(text: string, property: Property): string {
-  let next = fillContractFromOccupants(text, property);
-  if (property.address.trim()) {
-    next = next.replace(/PROPERTY ADDRESS:\s*_+/, `PROPERTY ADDRESS: ${property.address.trim()}`);
-  }
-  return next;
+  return fillContractFromProperty(text, property);
 }
 
 function startingSigners(property: Property): { name: string; email: string }[] {
@@ -276,7 +273,7 @@ export default function PropertyDocumentModal({
                 <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 0 }}>
                   {loadingSource
                     ? "Opening the document…"
-                    : "Change anything you need. Word layout is simplified so the wording can be edited. DocuSeal emails this to the signer."}
+                    : "Names, address, lease dates, rent, and deposit are filled from this property when they are saved. Change anything before sending. DocuSeal emails this to the signer."}
                 </p>
               </div>
               {signers.map((signer, index) => (
