@@ -1,34 +1,59 @@
-import { requireLedgerUser } from "../../lib/server/ledgerAuth";
 import { completedContractPdf } from "../../lib/server/docuseal";
+import { userIdFromAuthorization } from "../../lib/server/ledgerAuth";
 
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== "GET" && request.method !== "POST") {
-    return Response.json({ error: "Method not allowed." }, { status: 405 });
+type Req = {
+  method?: string;
+  url?: string;
+  headers: Record<string, string | string[] | undefined>;
+  body?: { submissionId?: string };
+};
+type Res = {
+  status: (code: number) => { json: (body: unknown) => void };
+  setHeader: (name: string, value: string) => void;
+  send: (body: Buffer) => void;
+};
+
+function header(req: Req, name: string): string {
+  const value = req.headers[name.toLowerCase()] ?? req.headers[name];
+  return Array.isArray(value) ? value[0] || "" : value || "";
+}
+
+export default async function handler(req: Req, res: Res): Promise<void> {
+  if (req.method !== "GET" && req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed." });
+    return;
   }
-  const auth = await requireLedgerUser(request);
-  if (auth instanceof Response) return auth;
+  const auth = await userIdFromAuthorization(header(req, "authorization"));
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
 
-  const url = new URL(request.url);
+  const url = new URL(req.url || "/", "https://easyledger.app");
   let submissionId = url.searchParams.get("submissionId") || "";
-  if (request.method === "POST") {
-    const body = (await request.json().catch(() => null)) as { submissionId?: string } | null;
-    submissionId = body?.submissionId || submissionId;
-  }
+  if (req.method === "POST") submissionId = req.body?.submissionId || submissionId;
   submissionId = submissionId.trim();
-  if (!submissionId) return Response.json({ error: "Missing contract." }, { status: 400 });
+  if (!submissionId) {
+    res.status(400).json({ error: "Missing contract." });
+    return;
+  }
 
   const result = await completedContractPdf(submissionId);
-  if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
   if (!result.data.completed || !result.data.pdf) {
-    return Response.json({ status: result.data.status, completed: false });
+    res.status(200).json({ status: result.data.status, completed: false });
+    return;
   }
-  if (request.method === "GET") {
-    return Response.json({ status: "completed", completed: true, fileName: result.data.fileName });
+  if (req.method === "GET") {
+    res.status(200).json({ status: "completed", completed: true, fileName: result.data.fileName });
+    return;
   }
-  return new Response(new Blob([result.data.pdf], { type: "application/pdf" }), {
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${(result.data.fileName || "signed-contract.pdf").replace(/"/g, "")}"`,
-    },
-  });
+  const fileName = (result.data.fileName || "signed-contract.pdf").replace(/"/g, "");
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  res.status(200);
+  res.send(Buffer.from(result.data.pdf));
 }
