@@ -34,6 +34,7 @@ import RepairsPanel from "../components/RepairsPanel";
 import RemindersPanel from "../components/RemindersPanel";
 import NotesList from "../components/NotesList";
 import ConfirmDialog from "../components/ConfirmDialog";
+import ContractPanel from "../components/ContractPanel";
 
 function TxnTable({
   rows,
@@ -620,6 +621,8 @@ export default function PropertyDetail() {
         onStartOpenHandled={() => setAskReminder(false)}
         onChanged={refresh}
       />
+
+      <ContractPanel property={property} onSaved={refresh} />
 
       <div className="card" style={{ marginBottom: 20 }}>
         <h3 style={{ marginBottom: 10 }}>Property Documents</h3>
