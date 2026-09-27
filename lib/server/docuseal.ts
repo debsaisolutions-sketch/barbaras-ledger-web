@@ -1,4 +1,5 @@
 import { visibleDocuSealFolder } from "../../src/contractFolders.js";
+import { signingHtmlFromText } from "../../src/signingDocument.js";
 
 const DOCUSEAL_API_URL = "https://api.docuseal.com";
 
@@ -106,6 +107,45 @@ export async function sendContract(opts: {
         name: signer.name,
         email: signer.email,
       })),
+    }),
+  });
+  if (!res.ok) return { ok: false, status: res.status, error: "DocuSeal could not send this contract." };
+  const body = await res.json();
+  const first = rowsFrom(body)[0] || (body && typeof body === "object" ? (body as Record<string, unknown>) : {});
+  const submissionId = first.submission_id ?? first.id;
+  if (submissionId == null || submissionId === "") {
+    return { ok: false, status: 502, error: "DocuSeal did not return a contract id." };
+  }
+  return { ok: true, data: { submissionId: String(submissionId) } };
+}
+
+export async function sendHtmlContract(opts: {
+  name: string;
+  text: string;
+  signerName: string;
+  signerEmail: string;
+}): Promise<DocuSealResult<{ submissionId: string }>> {
+  if (!apiKey()) return { ok: false, status: 500, error: "DocuSeal is not configured yet." };
+  const res = await docuseal("/submissions/html", {
+    method: "POST",
+    body: JSON.stringify({
+      name: opts.name,
+      send_email: true,
+      expire_at: expireAt(30),
+      documents: [
+        {
+          name: opts.name,
+          html: signingHtmlFromText(opts.text),
+          size: "Letter",
+        },
+      ],
+      submitters: [
+        {
+          role: "Signer",
+          name: opts.signerName,
+          email: opts.signerEmail,
+        },
+      ],
     }),
   });
   if (!res.ok) return { ok: false, status: res.status, error: "DocuSeal could not send this contract." };

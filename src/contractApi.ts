@@ -52,6 +52,23 @@ export async function contractSignatureStatus(submissionId: string): Promise<boo
   return Boolean(body.completed);
 }
 
+export async function sendEditedContract(input: {
+  name: string;
+  text: string;
+  signerName: string;
+  signerEmail: string;
+}): Promise<string> {
+  const res = await fetch("/api/contracts/send-html", {
+    method: "POST",
+    headers: await authHeaders(true),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await errorMessage(res));
+  const body = (await res.json()) as { submissionId?: string };
+  if (!body.submissionId) throw new Error("The contract was not sent.");
+  return body.submissionId;
+}
+
 export async function downloadSignedContract(submissionId: string): Promise<Blob> {
   const res = await fetch("/api/contracts/submission", {
     method: "POST",

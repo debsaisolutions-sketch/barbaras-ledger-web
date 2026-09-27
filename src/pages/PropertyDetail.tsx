@@ -8,7 +8,6 @@ import {
   getDocuments,
   getPropertyExpenses,
   getReminders,
-  addDocumentWithFile,
   getLedgerDisplayName,
   archiveProperty,
   markPropertySold,
@@ -22,7 +21,6 @@ import {
   type PropertyExpense,
   type Note,
   type Document as Doc,
-  type DocumentType,
   type Reminder,
 } from "../store";
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
@@ -35,6 +33,7 @@ import RemindersPanel from "../components/RemindersPanel";
 import NotesList from "../components/NotesList";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ContractPanel from "../components/ContractPanel";
+import PropertyDocumentModal from "../components/PropertyDocumentModal";
 
 function TxnTable({
   rows,
@@ -143,13 +142,6 @@ export default function PropertyDetail() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingProperty, setDeletingProperty] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [savingUpload, setSavingUpload] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadForm, setUploadForm] = useState({
-    name: "",
-    type: "Other" as DocumentType,
-    notes: "",
-  });
   const [ledgerTitle, setLedgerTitle] = useState("EasyLedger");
   const [txnAction, setTxnAction] = useState<null | { id: string; mode: "void" | "delete" }>(null);
   const [txnBusy, setTxnBusy] = useState(false);
@@ -344,38 +336,6 @@ export default function PropertyDetail() {
       alert((err as Error).message || "Could not delete document.");
     } finally {
       setDocBusy(false);
-    }
-  };
-
-  const saveDocument = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!property) return;
-    if (!uploadForm.name.trim()) {
-      alert("Please enter a document name.");
-      return;
-    }
-    if (!uploadFile) {
-      alert("Please choose a file to upload.");
-      return;
-    }
-    try {
-      setSavingUpload(true);
-      await addDocumentWithFile(uploadFile, {
-        documentName: uploadForm.name.trim(),
-        documentType: uploadForm.type,
-        relatedType: "property",
-        relatedId: property.id,
-        notes: uploadForm.notes.trim(),
-      });
-      setShowUploadModal(false);
-      setUploadFile(null);
-      setUploadForm({ name: "", type: "Other", notes: "" });
-      refresh();
-      alert("Document saved.");
-    } catch (err) {
-      alert((err as Error).message || "Could not save document.");
-    } finally {
-      setSavingUpload(false);
     }
   };
 
@@ -831,65 +791,12 @@ export default function PropertyDetail() {
         </ConfirmDialog>
       )}
 
-      {showUploadModal && (
-        <div className="modal-overlay" onClick={() => !savingUpload && setShowUploadModal(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Upload Document</h3>
-            <form onSubmit={(e) => void saveDocument(e)}>
-              <div className="form-group">
-                <label>Document Name *</label>
-                <input
-                  value={uploadForm.name}
-                  onChange={(e) => setUploadForm((f) => ({ ...f, name: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label>Document Type</label>
-                <select
-                  value={uploadForm.type}
-                  onChange={(e) => setUploadForm((f) => ({ ...f, type: e.target.value as DocumentType }))}
-                >
-                  <option>Rental Agreement</option>
-                  <option>Lease</option>
-                  <option>Receipt</option>
-                  <option>Check Image</option>
-                  <option>Payment Proof</option>
-                  <option>Tax Document</option>
-                  <option>Other</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Notes</label>
-                <textarea
-                  value={uploadForm.notes}
-                  onChange={(e) => setUploadForm((f) => ({ ...f, notes: e.target.value }))}
-                  style={{ minHeight: 90 }}
-                />
-              </div>
-              <div className="form-group">
-                <label>File upload *</label>
-                <input
-                  type="file"
-                  accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.heic,.heif,.webp,image/*,application/pdf"
-                  onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
-                />
-              </div>
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="btn btn-outline btn-lg"
-                  onClick={() => setShowUploadModal(false)}
-                  disabled={savingUpload}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary btn-lg" disabled={savingUpload}>
-                  {savingUpload ? "Saving…" : "Save Document"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {showUploadModal && property && (
+        <PropertyDocumentModal
+          property={property}
+          onClose={() => setShowUploadModal(false)}
+          onSaved={refresh}
+        />
       )}
 
       <div className="card" style={{ marginBottom: 20 }}>
