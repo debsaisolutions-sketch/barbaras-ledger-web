@@ -55,8 +55,7 @@ export async function contractSignatureStatus(submissionId: string): Promise<boo
 export async function sendEditedContract(input: {
   name: string;
   text: string;
-  signerName: string;
-  signerEmail: string;
+  signers: { name: string; email: string }[];
 }): Promise<string> {
   const res = await fetch("/api/contracts/send-html", {
     method: "POST",
