@@ -1,5 +1,5 @@
-import { listContractTemplates } from "../../lib/server/docuseal";
-import { userIdFromAuthorization } from "../../lib/server/ledgerAuth";
+import { listContractTemplates } from "../../lib/server/docuseal.js";
+import { userIdFromAuthorization } from "../../lib/server/ledgerAuth.js";
 
 type Req = { method?: string; headers: Record<string, string | string[] | undefined> };
 type Res = { status: (code: number) => { json: (body: unknown) => void } };

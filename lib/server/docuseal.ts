@@ -1,4 +1,4 @@
-import { visibleDocuSealFolder } from "../../src/contractFolders";
+import { visibleDocuSealFolder } from "../../src/contractFolders.js";
 
 const DOCUSEAL_API_URL = "https://api.docuseal.com";
 

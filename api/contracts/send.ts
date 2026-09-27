@@ -1,5 +1,5 @@
-import { sendContract, templateRoles, type ContractSigner } from "../../lib/server/docuseal";
-import { userIdFromAuthorization } from "../../lib/server/ledgerAuth";
+import { sendContract, templateRoles, type ContractSigner } from "../../lib/server/docuseal.js";
+import { userIdFromAuthorization } from "../../lib/server/ledgerAuth.js";
 
 type Req = {
   method?: string;

@@ -1,5 +1,5 @@
-import { completedContractPdf } from "../../lib/server/docuseal";
-import { userIdFromAuthorization } from "../../lib/server/ledgerAuth";
+import { completedContractPdf } from "../../lib/server/docuseal.js";
+import { userIdFromAuthorization } from "../../lib/server/ledgerAuth.js";
 
 type Req = {
   method?: string;
