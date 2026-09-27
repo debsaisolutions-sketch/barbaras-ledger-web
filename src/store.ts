@@ -100,6 +100,7 @@ export interface Property {
   coTenantName: string;
   coTenantEmail: string;
   coTenantPhone: string;
+  skippedRentPeriods: string[];
   monthlyRent: number;
   rentDueDay: number;
   leaseStartDate: string;
@@ -337,6 +338,9 @@ function mapProperty(row: Record<string, unknown>): Property {
     coTenantName: String(row.co_tenant_name ?? ""),
     coTenantEmail: String(row.co_tenant_email ?? ""),
     coTenantPhone: String(row.co_tenant_phone ?? ""),
+    skippedRentPeriods: Array.isArray(row.skipped_rent_periods)
+      ? row.skipped_rent_periods.map((value) => String(value))
+      : [],
     monthlyRent: num(row.monthly_rent),
     rentDueDay: Math.round(num(row.rent_due_day)) || 1,
     leaseStartDate: dateStr(row.lease_start_date),
@@ -684,6 +688,7 @@ export async function addProperty(
     co_tenant_name: data.coTenantName ?? "",
     co_tenant_email: data.coTenantEmail ?? "",
     co_tenant_phone: data.coTenantPhone ?? "",
+    skipped_rent_periods: data.skippedRentPeriods ?? [],
     monthly_rent: data.monthlyRent,
     rent_due_day: data.rentDueDay,
     lease_start_date: data.leaseStartDate || null,
@@ -734,6 +739,7 @@ export async function updateProperty(id: string, data: Partial<Property>): Promi
   if (data.coTenantName !== undefined) patch.co_tenant_name = data.coTenantName;
   if (data.coTenantEmail !== undefined) patch.co_tenant_email = data.coTenantEmail;
   if (data.coTenantPhone !== undefined) patch.co_tenant_phone = data.coTenantPhone;
+  if (data.skippedRentPeriods !== undefined) patch.skipped_rent_periods = data.skippedRentPeriods;
   if (data.monthlyRent !== undefined) patch.monthly_rent = data.monthlyRent;
   if (data.rentDueDay !== undefined) patch.rent_due_day = data.rentDueDay;
   if (data.leaseStartDate !== undefined) patch.lease_start_date = data.leaseStartDate || null;
@@ -1814,6 +1820,7 @@ export async function getDashboardStats(year?: number) {
         anchorDate: p.rentAnchorDate,
         intervalDays: p.rentIntervalDays,
         leaseStart: p.leaseStartDate,
+        skippedPeriods: p.skippedRentPeriods,
       },
       transactions: propTxns.filter((t) => t.propertyId === p.id),
       today,

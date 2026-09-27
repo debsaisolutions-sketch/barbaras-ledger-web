@@ -311,4 +311,21 @@ describe("existing ledger records", () => {
     });
     expect(due).toBe(600);
   });
+
+  it("hides a rent period the landlord removed and does not count it as owed", () => {
+    const periods = summarizeVisiblePeriods(
+      { ...monthly, skippedPeriods: ["2026-02-01|2026-02-28"] },
+      [],
+      "2026-03-12"
+    );
+    expect(periods.some((p) => p.start === "2026-02-01")).toBe(false);
+    expect(periods.some((p) => p.start === "2026-03-01")).toBe(true);
+    expect(
+      unpaidForDashboard({
+        schedule: { ...monthly, skippedPeriods: ["2026-03-01|2026-03-31"] },
+        today: "2026-03-12",
+        transactions: [],
+      })
+    ).toBe(0);
+  });
 });

@@ -158,6 +158,7 @@ export default function PropertyDetail() {
           anchorDate: property.rentAnchorDate,
           intervalDays: property.rentIntervalDays,
           leaseStart: property.leaseStartDate,
+          skippedPeriods: property.skippedRentPeriods,
         },
         transactions: txns
           .filter((t) => !property || !paidByPriorTenant(t.date, property.leaseStartDate, property.priorTenantName))
@@ -581,7 +582,7 @@ export default function PropertyDetail() {
         )}
       </div>
 
-      <RentPeriodList property={property} transactions={currentTxns} />
+      <RentPeriodList property={property} transactions={currentTxns} onChanged={refresh} />
 
       <RemindersPanel
         property={property}

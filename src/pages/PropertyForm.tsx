@@ -186,7 +186,7 @@ export default function PropertyForm() {
           reminderCompleted: reminderChanged ? false : undefined,
           reminderCompletedAt: reminderChanged ? "" : undefined,
         });
-      } else await addProperty(data);
+      } else await addProperty({ ...data, skippedRentPeriods: [] });
       refresh();
       alert(isEdit ? "Saved. Your property was updated." : "Saved. Your property was added.");
       navigate(isEdit ? `/properties/${id}` : "/properties");

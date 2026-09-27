@@ -56,6 +56,8 @@ export interface RentScheduleInput {
   anchorDate: string;
   intervalDays: number | null;
   leaseStart?: string;
+  /** Period keys from rentPeriodKey. Those months are hidden and not counted as owed. */
+  skippedPeriods?: string[];
 }
 
 const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -249,7 +251,7 @@ function resolveAnchor(schedule: RentScheduleInput, today: string): string {
   return today;
 }
 
-function periodKey(p: { start: string; end: string }): string {
+export function rentPeriodKey(p: { start: string; end: string }): string {
   return `${p.start}|${p.end}`;
 }
 
@@ -309,7 +311,7 @@ export function visibleRentPeriods(
 ): RentPeriod[] {
   const expected = money(schedule.expectedAmount);
   const map = new Map<string, RentPeriod>();
-  const add = (p: RentPeriod) => map.set(periodKey(p), p);
+  const add = (p: RentPeriod) => map.set(rentPeriodKey(p), p);
 
   if (schedule.frequency === "monthly") {
     const iso = isIsoDate(today) ? today : new Date().toISOString().slice(0, 10);
@@ -342,8 +344,10 @@ export function visibleRentPeriods(
   }
 
   const anchor = schedule.frequency === "monthly" ? "" : resolveAnchor(schedule, today);
+  const skipped = new Set(schedule.skippedPeriods || []);
   return [...map.values()]
     .filter((period) => !anchor || period.end >= anchor)
+    .filter((period) => !skipped.has(rentPeriodKey(period)))
     .sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
 }
 
