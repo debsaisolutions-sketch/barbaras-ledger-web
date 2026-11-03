@@ -4,11 +4,14 @@ import {
   money,
   paidByPriorTenant,
   summarizeVisiblePeriods,
-  unpaidForDashboard,
+  unappliedRentSurplus,
   type RentFrequency,
   type RentPaymentInput,
   type RentScheduleInput,
 } from "./rentSchedule";
+import { personKey, preferredPersonName, samePersonName } from "./tenantAliases";
+
+export { samePersonName } from "./tenantAliases";
 
 export interface BalanceProperty {
   id: string;
@@ -44,6 +47,8 @@ export interface CarriedFromUnit {
   propertyId: string;
   propertyName: string;
   amount: number;
+  /** Spelling used on the lease where this person lives now. */
+  tenantName: string;
 }
 
 export interface PropertyMoney {
@@ -58,13 +63,6 @@ export interface PropertyMoney {
   householdBalance: number;
   /** Homes whose displayed total already includes this unit's prior balance. */
   includedOn: { propertyId: string; propertyName: string }[];
-}
-
-export function samePersonName(a: string, b: string): boolean {
-  const norm = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
-  const left = norm(a);
-  const right = norm(b);
-  return left.length > 0 && left === right;
 }
 
 export function currentOccupantNames(property: {
@@ -181,18 +179,50 @@ export function owedOnSchedule(
   return money(owed);
 }
 
-function currentLeaseBalance(
+function activeTransactions(transactions: BalanceTransaction[]): BalanceTransaction[] {
+  return transactions.filter((txn) => !txn.voidedAt);
+}
+
+/** Due on this lease, and cash beyond that. The extra is not a credit. */
+function leaseFigures(
   property: BalanceProperty,
   transactions: BalanceTransaction[],
   today: string
-): number {
+): { due: number; surplus: number } {
+  const active = activeTransactions(transactions);
   const schedule = scheduleFor(property);
-  const hasCharges = transactions.some((txn) => !txn.voidedAt && txn.chargeAmount > 0);
+  const hasCharges = active.some((txn) => txn.chargeAmount > 0);
   if (hasCharges) {
-    return unpaidForDashboard({ schedule, transactions, today });
+    let net = 0;
+    for (const txn of active) net += txn.chargeAmount - txn.paymentAmount;
+    return { due: Math.max(0, money(net)), surplus: Math.max(0, money(-net)) };
   }
-  if (money(property.monthlyRent) <= 0) return 0;
-  return owedOnSchedule(schedule, transactions, today);
+  if (money(property.monthlyRent) <= 0) return { due: 0, surplus: 0 };
+  const due = owedOnSchedule(schedule, active, today);
+  const surplus = unappliedRentSurplus(schedule, asPayments(active), today);
+  return { due, surplus };
+}
+
+export function backRentByTenant(
+  carried: CarriedFromUnit[]
+): { tenantName: string; amount: number; sources: string[] }[] {
+  const grouped = new Map<string, { tenantName: string; amount: number; sources: string[] }>();
+  for (const item of carried) {
+    if (item.amount <= 0) continue;
+    const key = personKey(item.tenantName);
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.amount = money(existing.amount + item.amount);
+      if (!existing.sources.includes(item.propertyName)) existing.sources.push(item.propertyName);
+    } else {
+      grouped.set(key, {
+        tenantName: item.tenantName,
+        amount: item.amount,
+        sources: [item.propertyName],
+      });
+    }
+  }
+  return [...grouped.values()];
 }
 
 export function summarizePropertyMoney(
@@ -220,30 +250,46 @@ export function summarizePropertyMoney(
         currentTxns.push(txn);
       }
     }
+    const lease = leaseFigures(property, currentTxns, today);
     return {
       propertyId: property.id,
       propertyName: property.propertyName,
       occupants,
-      currentBalance: currentLeaseBalance(property, currentTxns, today),
-      priorBalance: property.priorTenantName.trim() ? ledgerBalance(priorTxns) : 0,
+      currentBalance: lease.due,
+      surplus: lease.surplus,
+      priorRemaining: property.priorTenantName.trim() ? ledgerBalance(priorTxns) : 0,
       priorTenantName: property.priorTenantName.trim(),
     };
   });
 
+  for (const unit of units) {
+    let pool = unit.surplus;
+    if (pool <= 0) continue;
+    for (const other of units) {
+      if (other.priorRemaining <= 0) continue;
+      if (!unit.occupants.some((name) => samePersonName(name, other.priorTenantName))) continue;
+      const take = Math.min(pool, other.priorRemaining);
+      other.priorRemaining = money(other.priorRemaining - take);
+      pool = money(pool - take);
+      if (pool <= 0) break;
+    }
+  }
+
   const withCarry = units.map((unit) => {
     const carried = units
-      .filter((other) => other.propertyId !== unit.propertyId && other.priorBalance > 0)
+      .filter((other) => other.propertyId !== unit.propertyId && other.priorRemaining > 0)
       .filter((other) => unit.occupants.some((name) => samePersonName(name, other.priorTenantName)))
       .map((other) => ({
         propertyId: other.propertyId,
         propertyName: other.propertyName,
-        amount: other.priorBalance,
+        amount: other.priorRemaining,
+        tenantName: preferredPersonName(other.priorTenantName, unit.occupants),
       }));
     return {
       propertyId: unit.propertyId,
       propertyName: unit.propertyName,
       currentBalance: unit.currentBalance,
-      priorBalance: unit.priorBalance,
+      priorBalance: unit.priorRemaining,
       priorTenantName: unit.priorTenantName,
       carried,
       householdBalance: money(unit.currentBalance + carried.reduce((sum, item) => sum + item.amount, 0)),

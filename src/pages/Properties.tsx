@@ -5,10 +5,58 @@ import {
   getAllPropertyTransactions,
   type Property,
 } from "../store";
-import { summarizePropertyMoney, type PropertyMoney } from "../tenantBalances";
+import { backRentByTenant, summarizePropertyMoney, type PropertyMoney } from "../tenantBalances";
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
 import { occupantLabel } from "../occupants";
 import { useRefresh } from "../App";
+
+export function RentalPropertyCard({
+  property: p,
+  onOpen,
+}: {
+  property: Property & PropertyMoney;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="list-item" onClick={onOpen}>
+      <span className="item-icon">🏠</span>
+      <div className="item-content">
+        <div className="item-title">{p.propertyName}</div>
+        <div className="item-subtitle">
+          {occupantLabel(p) || "No tenant"} · {p.address}
+          {p.status === "Sold" && (p.salePrice != null || p.soldDate) ? (
+            <>
+              {" "}
+              · Sold
+              {p.soldDate ? ` ${fmtDate(p.soldDate)}` : ""}
+              {p.salePrice != null ? ` · ${fmtCurrency(p.salePrice)}` : ""}
+            </>
+          ) : null}
+        </div>
+        {backRentByTenant(p.carried).map((line) => (
+          <div key={line.tenantName} className="item-subtitle" style={{ color: "var(--error)" }}>
+            {line.tenantName} back rent: {fmtCurrency(line.amount)}
+          </div>
+        ))}
+        {p.priorBalance > 0 && p.includedOn.length === 0 && (
+          <div className="item-subtitle" style={{ color: "var(--error)" }}>
+            {p.priorTenantName || "Previous tenant"} still owes {fmtCurrency(p.priorBalance)} on this unit
+          </div>
+        )}
+      </div>
+      <div className="item-right">
+        <div
+          className="item-amount"
+          style={{ color: p.currentBalance > 0 ? "var(--error)" : "var(--success)" }}
+        >
+          {p.currentBalance > 0 ? `${fmtCurrency(p.currentBalance)} due` : "Paid up"}
+        </div>
+        <span className={`badge ${statusBadge(p.status)}`}>{p.status}</span>
+      </div>
+      <span className="item-arrow">›</span>
+    </div>
+  );
+}
 
 export default function Properties() {
   const navigate = useNavigate();
@@ -121,49 +169,7 @@ export default function Properties() {
         </div>
       ) : (
         filtered.map((p) => (
-          <div key={p.id} className="list-item" onClick={() => navigate(`/properties/${p.id}`)}>
-            <span className="item-icon">🏠</span>
-            <div className="item-content">
-              <div className="item-title">{p.propertyName}</div>
-              <div className="item-subtitle">
-                {occupantLabel(p) || "No tenant"} · {p.address}
-                {p.status === "Sold" && (p.salePrice != null || p.soldDate) ? (
-                  <>
-                    {" "}
-                    · Sold
-                    {p.soldDate ? ` ${fmtDate(p.soldDate)}` : ""}
-                    {p.salePrice != null ? ` · ${fmtCurrency(p.salePrice)}` : ""}
-                  </>
-                ) : null}
-              </div>
-              {p.carried.length > 0 && (
-                <div className="item-subtitle">
-                  Includes{" "}
-                  {p.carried
-                    .map((item) => `${fmtCurrency(item.amount)} still open on ${item.propertyName}`)
-                    .join(", ")}
-                </div>
-              )}
-              {p.priorBalance > 0 && (
-                <div className="item-subtitle" style={{ color: "var(--error)" }}>
-                  {p.priorTenantName || "Previous tenant"} still owes {fmtCurrency(p.priorBalance)} on this unit
-                  {p.includedOn.length > 0
-                    ? ` (included in the total on ${p.includedOn.map((home) => home.propertyName).join(", ")})`
-                    : ""}
-                </div>
-              )}
-            </div>
-            <div className="item-right">
-              <div
-                className="item-amount"
-                style={{ color: p.householdBalance > 0 ? "var(--error)" : "var(--success)" }}
-              >
-                {p.householdBalance > 0 ? `${fmtCurrency(p.householdBalance)} due` : "Paid up"}
-              </div>
-              <span className={`badge ${statusBadge(p.status)}`}>{p.status}</span>
-            </div>
-            <span className="item-arrow">›</span>
-          </div>
+          <RentalPropertyCard key={p.id} property={p} onOpen={() => navigate(`/properties/${p.id}`)} />
         ))
       )}
     </div>

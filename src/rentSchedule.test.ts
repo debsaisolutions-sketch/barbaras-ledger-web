@@ -138,6 +138,67 @@ describe("rent payments", () => {
     expect(summarizePeriod(april, [early], "2026-03-28").status).toBe("Paid");
   });
 
+  it("puts cash above the current period onto earlier unpaid rent", () => {
+    const schedule: RentScheduleInput = {
+      frequency: "biweekly",
+      expectedAmount: 400,
+      dueDay: 1,
+      anchorDate: "2026-09-23",
+      intervalDays: null,
+      leaseStart: "2026-09-19",
+    };
+    const periods = summarizeVisiblePeriods(
+      schedule,
+      [
+        pay({ id: "sep", date: "2026-09-24", amount: 300 }),
+        pay({ id: "oct7", date: "2026-10-07", amount: 400 }),
+        pay({ id: "oct21", date: "2026-10-21", amount: 400 }),
+        pay({
+          id: "nov3",
+          date: "2026-11-03",
+          amount: 100,
+          rentPeriodStart: "2026-10-21",
+          rentPeriodEnd: "2026-11-03",
+        }),
+      ],
+      "2026-11-03"
+    );
+    const first = periods.find((period) => period.start === "2026-09-23");
+    const current = periods.find((period) => period.start === "2026-10-21");
+    expect(current?.end).toBe("2026-11-03");
+    expect(first?.remaining).toBe(0);
+    expect(first?.coveredByLaterPayment).toBe(100);
+    expect(current?.appliedToEarlierRent).toBe(100);
+    expect(current?.status).toBe("Paid");
+    expect(current?.unappliedExtra).toBe(0);
+    expect(periods.some((period) => period.status === "Overpaid")).toBe(false);
+  });
+
+  it("does not clear a short October 31 period by moving money that is not extra", () => {
+    const periods = summarizeVisiblePeriods(
+      {
+        frequency: "biweekly",
+        expectedAmount: 400,
+        dueDay: 1,
+        anchorDate: "2026-09-19",
+        intervalDays: null,
+        leaseStart: "2026-09-19",
+      },
+      [
+        pay({ id: "sep", date: "2026-09-24", amount: 300 }),
+        pay({ id: "oct7", date: "2026-10-07", amount: 400 }),
+        pay({ id: "oct21", date: "2026-10-21", amount: 400 }),
+        pay({ id: "nov3", date: "2026-11-03", amount: 100 }),
+      ],
+      "2026-11-03"
+    );
+    const current = periods.find((period) => period.start === "2026-10-31");
+    const first = periods.find((period) => period.start === "2026-09-19");
+    expect(current?.end).toBe("2026-11-13");
+    expect(current?.remaining).toBe(300);
+    expect(first?.remaining).toBe(100);
+  });
+
   it("ignores a voided payment", () => {
     const summary = summarizePeriod(
       march,

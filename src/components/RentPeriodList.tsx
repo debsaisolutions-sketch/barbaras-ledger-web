@@ -139,6 +139,21 @@ function PeriodCard({
           <p>{period.status === "Upcoming" ? "Later" : fmtCurrency(period.remaining)}</p>
         </div>
       </div>
+      {period.appliedToEarlierRent > 0 && (
+        <p style={{ color: "var(--muted)", margin: "8px 0 0" }}>
+          Extra {fmtCurrency(period.appliedToEarlierRent)} paid earlier rent. It is not a credit.
+        </p>
+      )}
+      {period.coveredByLaterPayment > 0 && (
+        <p style={{ color: "var(--muted)", margin: "8px 0 0" }}>
+          Includes {fmtCurrency(period.coveredByLaterPayment)} from a later payment.
+        </p>
+      )}
+      {period.unappliedExtra > 0 && (
+        <p style={{ color: "var(--muted)", margin: "8px 0 0" }}>
+          Extra {fmtCurrency(period.unappliedExtra)} is not shown as a credit or as paid ahead.
+        </p>
+      )}
       {rows.length > 0 && (
         <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
           {rows.map((t) => (

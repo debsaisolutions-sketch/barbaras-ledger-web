@@ -29,7 +29,13 @@ import { fmtCurrency, fmtDate, ledgerNameForDisplay, statusBadge } from "../help
 import { occupantLabel } from "../occupants";
 import { useRefresh } from "../App";
 import { downloadDocumentFile, openDocumentInNewTab } from "../documentFiles";
-import { transactionBelongsToPriorTenant, summarizePropertyMoney, type PropertyMoney } from "../tenantBalances";
+import {
+  backRentByTenant,
+  transactionBelongsToPriorTenant,
+  summarizePropertyMoney,
+  type CarriedFromUnit,
+  type PropertyMoney,
+} from "../tenantBalances";
 import RentPeriodList from "../components/RentPeriodList";
 import RepairsPanel from "../components/RepairsPanel";
 import RemindersPanel from "../components/RemindersPanel";
@@ -121,6 +127,25 @@ function TxnTable({
   );
 }
 
+function BackRentFigures({ carried }: { carried: CarriedFromUnit[] }) {
+  const lines = backRentByTenant(carried);
+  if (lines.length === 0) return null;
+  return (
+    <>
+      {lines.map((line) => (
+        <div className="detail-info-item" key={line.tenantName}>
+          <label>{line.tenantName} back rent</label>
+          <p style={{ color: "var(--error)", fontSize: 22, fontWeight: 800 }}>{fmtCurrency(line.amount)}</p>
+          <p style={{ color: "var(--muted)", fontSize: 14 }}>
+            {line.tenantName} back rent: {fmtCurrency(line.amount)}. This follows {line.tenantName}, not a unit
+            {line.sources.length > 0 ? `, from ${line.sources.join(", ")}` : ""}.
+          </p>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function rowIsPrior(property: Property, txn: PropertyTransaction): boolean {
   return transactionBelongsToPriorTenant({
     date: txn.date,
@@ -168,9 +193,9 @@ export default function PropertyDetail() {
       ? summarizePropertyMoney(ledgerProps, ledgerTxns, today)
       : [];
   const unit = property ? portfolio.find((row) => row.propertyId === property.id) : undefined;
-  const householdBalance = unit?.householdBalance ?? 0;
   const currentOnlyBalance = unit?.currentBalance ?? 0;
   const priorOwed = unit?.priorBalance ?? 0;
+  const priorShownHere = priorOwed > 0 && (unit?.includedOn.length ?? 0) === 0;
   const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
   const priorSource = property ? txns.filter((t) => rowIsPrior(property, t)) : [];
   const showPrior = priorSource.length > 0;
@@ -469,24 +494,16 @@ export default function PropertyDetail() {
             <label>Owed by {occupantLabel(property) || "current tenants"}</label>
             <p
               style={{
-                color: householdBalance > 0 ? "var(--error)" : "var(--success)",
+                color: currentOnlyBalance > 0 ? "var(--error)" : "var(--success)",
                 fontSize: 22,
                 fontWeight: 800,
               }}
             >
-              {fmtCurrency(Math.max(0, householdBalance))}
+              {fmtCurrency(Math.max(0, currentOnlyBalance))}
             </p>
-            {unit && unit.carried.length > 0 && (
-              <p style={{ color: "var(--muted)", fontSize: 14 }}>
-                {fmtCurrency(currentOnlyBalance)} on this unit
-                {unit.carried
-                  .map((item) => ` plus ${fmtCurrency(item.amount)} still open on ${item.propertyName}`)
-                  .join("")}
-                .
-              </p>
-            )}
           </div>
-          {priorOwed > 0 && (
+          {unit ? <BackRentFigures carried={unit.carried} /> : null}
+          {priorShownHere && (
             <div className="detail-info-item">
               <label>Still owed by {property.priorTenantName || "previous tenant"}</label>
               <p style={{ color: "var(--error)", fontSize: 22, fontWeight: 800 }}>
@@ -494,9 +511,6 @@ export default function PropertyDetail() {
               </p>
               <p style={{ color: "var(--muted)", fontSize: 14 }}>
                 Kept on this property, separate from the current lease.
-                {unit && unit.includedOn.length > 0
-                  ? ` Included in the total on ${unit.includedOn.map((home) => home.propertyName).join(", ")}.`
-                  : ""}
               </p>
             </div>
           )}
@@ -836,8 +850,16 @@ export default function PropertyDetail() {
           <div className="detail-info-item"><label>Rent</label><p>{fmtCurrency(property.monthlyRent)}</p></div>
           <div className="detail-info-item"><label>Due day</label><p>{property.rentDueDay || "—"}</p></div>
           <div className="detail-info-item"><label>Status</label><p>{property.status}</p></div>
-          <div className="detail-info-item"><label>Owed by {occupantLabel(property) || "current tenants"}</label><p>{fmtCurrency(Math.max(0, householdBalance))}</p></div>
-          {priorOwed > 0 && (
+          <div className="detail-info-item"><label>Owed by {occupantLabel(property) || "current tenants"}</label><p>{fmtCurrency(Math.max(0, currentOnlyBalance))}</p></div>
+          {unit
+            ? backRentByTenant(unit.carried).map((line) => (
+                <div className="detail-info-item" key={`print-${line.tenantName}`}>
+                  <label>{line.tenantName} back rent</label>
+                  <p>{fmtCurrency(line.amount)}</p>
+                </div>
+              ))
+            : null}
+          {priorShownHere && (
             <div className="detail-info-item">
               <label>Still owed by {property.priorTenantName || "previous tenant"}</label>
               <p>{fmtCurrency(priorOwed)}</p>
@@ -960,16 +982,15 @@ export default function PropertyDetail() {
                   {property.leaseStartDate ? `, before ${fmtDate(property.leaseStartDate)}` : ""}
                 </h3>
                 <p style={{ marginTop: 0, color: "var(--muted)" }}>
-                  Still owes {fmtCurrency(priorOwed)} on {property.propertyName}. This history stays on this property.
-                  It is not part of {occupantLabel(property) || "the current tenants"}&apos;s balance.
                   {unit && unit.includedOn.length > 0
-                    ? ` ${property.priorTenantName}'s total, including ${unit.includedOn
-                        .map((home) => home.propertyName)
-                        .join(", ")}, is ${fmtCurrency(
-                        portfolio.find((row) => row.propertyId === unit.includedOn[0].propertyId)?.householdBalance ??
-                          priorOwed
-                      )}.`
-                    : ""}
+                    ? `These older rows stay on ${property.propertyName} for the record. They are not part of ${
+                        occupantLabel(property) || "the current tenants"
+                      }'s balance. Any amount still unpaid is ${
+                        property.priorTenantName || "the previous tenant"
+                      }'s back rent on ${unit.includedOn.map((home) => home.propertyName).join(", ")}.`
+                    : `Still owes ${fmtCurrency(priorOwed)} on ${property.propertyName}. This history stays on this property. It is not part of ${
+                        occupantLabel(property) || "the current tenants"
+                      }'s balance.`}
                 </p>
                 <TxnTable rows={priorTxns} property={property} setTxnAction={setTxnAction} refresh={refresh} />
               </div>
