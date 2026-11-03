@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { getBarbaraSupabaseKeyDebugInfo, resolvedSupabaseUrl, supabase } from "../lib/supabase";
+import { getSupabaseKeyDebugInfo, resolvedSupabaseUrl, supabase } from "../lib/supabase";
 
 type AuthContextValue = {
   session: Session | null;
@@ -55,10 +55,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (error) {
       const err = error as Error & { status?: number; code?: string };
-      // TEMPORARY (Barbara login debug — safe: no full anon key)
-      console.error("[Barbara Login Debug] signInWithPassword failed", {
+      console.error("[EasyLedger Login Debug] signInWithPassword failed", {
         supabaseUrlUsed: resolvedSupabaseUrl || "(missing)",
-        ...getBarbaraSupabaseKeyDebugInfo(),
+        ...getSupabaseKeyDebugInfo(),
         emailUsed: emailTrimmed,
         passwordLength: password.length,
         authErrorMessage: error.message,
@@ -70,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (import.meta.env.DEV && data.session) {
-      console.info("[Barbara Login Debug] signInWithPassword ok", { emailUsed: emailTrimmed });
+      console.info("[EasyLedger Login Debug] signInWithPassword ok", { emailUsed: emailTrimmed });
     }
 
     return { error: null };

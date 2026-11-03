@@ -7,6 +7,7 @@ import {
   DEFAULT_LEDGER_PRODUCT_NAME,
 } from "../store";
 import { useRefresh } from "../App";
+import { ledgerNameForDisplay } from "../helpers";
 
 export default function Settings() {
   const { refresh } = useRefresh();
@@ -19,7 +20,10 @@ export default function Settings() {
     (async () => {
       try {
         const v = await getLedgerDisplayName();
-        if (!cancelled) setLedgerName(v);
+        if (!cancelled) {
+          const shown = ledgerNameForDisplay(v);
+          setLedgerName(shown === DEFAULT_LEDGER_PRODUCT_NAME ? "" : shown);
+        }
       } catch {
         /* ignore */
       }

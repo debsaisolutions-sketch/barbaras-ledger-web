@@ -2,7 +2,9 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   getProperty,
+  getProperties,
   getPropertyTransactions,
+  getAllPropertyTransactions,
   getRunningBalanceTable,
   getPropertyScopedNotes,
   getDocuments,
@@ -23,11 +25,11 @@ import {
   type Document as Doc,
   type Reminder,
 } from "../store";
-import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
+import { fmtCurrency, fmtDate, ledgerNameForDisplay, statusBadge } from "../helpers";
 import { occupantLabel } from "../occupants";
 import { useRefresh } from "../App";
 import { downloadDocumentFile, openDocumentInNewTab } from "../documentFiles";
-import { paidByPriorTenant, unpaidForDashboard } from "../rentSchedule";
+import { transactionBelongsToPriorTenant, summarizePropertyMoney, type PropertyMoney } from "../tenantBalances";
 import RentPeriodList from "../components/RentPeriodList";
 import RepairsPanel from "../components/RepairsPanel";
 import RemindersPanel from "../components/RemindersPanel";
@@ -119,6 +121,16 @@ function TxnTable({
   );
 }
 
+function rowIsPrior(property: Property, txn: PropertyTransaction): boolean {
+  return transactionBelongsToPriorTenant({
+    date: txn.date,
+    tenantName: txn.tenantName,
+    leaseStart: property.leaseStartDate,
+    priorTenantName: property.priorTenantName,
+    currentTenantNames: [property.tenantName, property.coTenantName],
+  });
+}
+
 export default function PropertyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -148,49 +160,25 @@ export default function PropertyDetail() {
   const [txnBusy, setTxnBusy] = useState(false);
   const [docToDelete, setDocToDelete] = useState<Doc | null>(null);
   const [docBusy, setDocBusy] = useState(false);
+  const [ledgerProps, setLedgerProps] = useState<Property[]>([]);
+  const [ledgerTxns, setLedgerTxns] = useState<PropertyTransaction[]>([]);
   const today = new Date().toISOString().split("T")[0];
-  const balance = property
-    ? unpaidForDashboard({
-        schedule: {
-          frequency: property.rentFrequency,
-          expectedAmount: property.monthlyRent,
-          dueDay: property.rentDueDay,
-          anchorDate: property.rentAnchorDate,
-          intervalDays: property.rentIntervalDays,
-          leaseStart: property.leaseStartDate,
-          skippedPeriods: property.skippedRentPeriods,
-        },
-        transactions: txns
-          .filter((t) => !property || !paidByPriorTenant(t.date, property.leaseStartDate, property.priorTenantName))
-          .map((t) => ({
-          id: t.id,
-          type: t.type,
-          applyTo: t.applyTo,
-          date: t.date,
-          chargeAmount: t.chargeAmount,
-          paymentAmount: t.paymentAmount,
-          rentPeriodStart: t.rentPeriodStart,
-          rentPeriodEnd: t.rentPeriodEnd,
-          voidedAt: t.voidedAt,
-        })),
-        today,
-      })
-    : 0;
-  const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
-  const showPrior = Boolean(property?.priorTenantName && property.leaseStartDate);
-  const priorTxns =
-    showPrior && property
-      ? getRunningBalanceTable(
-          txns.filter((t) => paidByPriorTenant(t.date, property.leaseStartDate, property.priorTenantName))
-        )
+  const portfolio: PropertyMoney[] =
+    ledgerProps.length > 0
+      ? summarizePropertyMoney(ledgerProps, ledgerTxns, today)
       : [];
+  const unit = property ? portfolio.find((row) => row.propertyId === property.id) : undefined;
+  const householdBalance = unit?.householdBalance ?? 0;
+  const currentOnlyBalance = unit?.currentBalance ?? 0;
+  const priorOwed = unit?.priorBalance ?? 0;
+  const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
+  const priorSource = property ? txns.filter((t) => rowIsPrior(property, t)) : [];
+  const showPrior = priorSource.length > 0;
+  const priorTxns = showPrior ? getRunningBalanceTable(priorSource) : [];
   const currentTxns =
     showPrior && property
-      ? getRunningBalanceTable(
-          txns.filter((t) => !paidByPriorTenant(t.date, property.leaseStartDate, property.priorTenantName))
-        )
+      ? getRunningBalanceTable(txns.filter((t) => !rowIsPrior(property, t)))
       : txns;
-  const priorReceived = priorTxns.reduce((sum, t) => (t.voidedAt ? sum : sum + t.paymentAmount), 0);
 
   const canRecordPayments =
     property &&
@@ -208,15 +196,19 @@ export default function PropertyDetail() {
           if (!cancelled) setProperty(null);
           return;
         }
-        const [rawTxns, n, d, ex, rems] = await Promise.all([
+        const [rawTxns, n, d, ex, rems, allProps, allTxns] = await Promise.all([
           getPropertyTransactions(id),
           getPropertyScopedNotes(id),
           getDocuments("property", id),
           getPropertyExpenses(id),
           getReminders(),
+          getProperties(),
+          getAllPropertyTransactions(),
         ]);
         if (cancelled) return;
         setProperty(p);
+        setLedgerProps(allProps);
+        setLedgerTxns(allTxns);
         setTxns(getRunningBalanceTable(rawTxns));
         setNotes(n);
         setDocs(d);
@@ -238,7 +230,7 @@ export default function PropertyDetail() {
     (async () => {
       try {
         const custom = await getLedgerDisplayName();
-        if (!cancelled && custom) setLedgerTitle(custom);
+        if (!cancelled) setLedgerTitle(ledgerNameForDisplay(custom));
       } catch {
         /* keep default */
       }
@@ -474,17 +466,40 @@ export default function PropertyDetail() {
             <p>{fmtCurrency(property.securityDeposit)}</p>
           </div>
           <div className="detail-info-item">
-            <label>Current Balance</label>
+            <label>Owed by {occupantLabel(property) || "current tenants"}</label>
             <p
               style={{
-                color: balance > 0 ? "var(--error)" : "var(--success)",
+                color: householdBalance > 0 ? "var(--error)" : "var(--success)",
                 fontSize: 22,
                 fontWeight: 800,
               }}
             >
-              {fmtCurrency(Math.max(0, balance))}
+              {fmtCurrency(Math.max(0, householdBalance))}
             </p>
+            {unit && unit.carried.length > 0 && (
+              <p style={{ color: "var(--muted)", fontSize: 14 }}>
+                {fmtCurrency(currentOnlyBalance)} on this unit
+                {unit.carried
+                  .map((item) => ` plus ${fmtCurrency(item.amount)} still open on ${item.propertyName}`)
+                  .join("")}
+                .
+              </p>
+            )}
           </div>
+          {priorOwed > 0 && (
+            <div className="detail-info-item">
+              <label>Still owed by {property.priorTenantName || "previous tenant"}</label>
+              <p style={{ color: "var(--error)", fontSize: 22, fontWeight: 800 }}>
+                {fmtCurrency(priorOwed)}
+              </p>
+              <p style={{ color: "var(--muted)", fontSize: 14 }}>
+                Kept on this property, separate from the current lease.
+                {unit && unit.includedOn.length > 0
+                  ? ` Included in the total on ${unit.includedOn.map((home) => home.propertyName).join(", ")}.`
+                  : ""}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -821,7 +836,13 @@ export default function PropertyDetail() {
           <div className="detail-info-item"><label>Rent</label><p>{fmtCurrency(property.monthlyRent)}</p></div>
           <div className="detail-info-item"><label>Due day</label><p>{property.rentDueDay || "—"}</p></div>
           <div className="detail-info-item"><label>Status</label><p>{property.status}</p></div>
-          <div className="detail-info-item"><label>Current balance</label><p>{fmtCurrency(Math.max(0, balance))}</p></div>
+          <div className="detail-info-item"><label>Owed by {occupantLabel(property) || "current tenants"}</label><p>{fmtCurrency(Math.max(0, householdBalance))}</p></div>
+          {priorOwed > 0 && (
+            <div className="detail-info-item">
+              <label>Still owed by {property.priorTenantName || "previous tenant"}</label>
+              <p>{fmtCurrency(priorOwed)}</p>
+            </div>
+          )}
           <div className="detail-info-item">
             <label>Total repairs &amp; expenses</label>
             <p style={{ fontWeight: 700 }}>{fmtCurrency(expenseTotal)}</p>
@@ -866,22 +887,33 @@ export default function PropertyDetail() {
           </div>
         )}
         <h4 style={{ marginTop: 16, marginBottom: 8 }}>Payment / Charge History</h4>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Date</th><th>Description</th><th>Charges</th><th>Payments</th><th>Balance</th></tr></thead>
-            <tbody>
-              {txns.map((t) => (
-                <tr key={`print-${t.id}`}>
-                  <td>{fmtDate(t.date)}</td>
-                  <td>{t.description}</td>
-                  <td>{t.chargeAmount > 0 ? fmtCurrency(t.chargeAmount) : ""}</td>
-                  <td>{t.paymentAmount > 0 ? fmtCurrency(t.paymentAmount) : ""}</td>
-                  <td>{fmtCurrency(Math.max(0, t.runningBalance))}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {(showPrior
+          ? [
+              { title: property.priorTenantName || "Previous tenant", rows: priorTxns },
+              { title: occupantLabel(property) || "Current tenants", rows: currentTxns },
+            ]
+          : [{ title: "", rows: txns }]
+        ).map((group) => (
+          <div key={group.title || "all-history"}>
+            {group.title ? <h4 style={{ marginTop: 12, marginBottom: 8 }}>{group.title}</h4> : null}
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Date</th><th>Description</th><th>Charges</th><th>Payments</th><th>Balance</th></tr></thead>
+                <tbody>
+                  {group.rows.map((t) => (
+                    <tr key={`print-${t.id}`}>
+                      <td>{fmtDate(t.date)}</td>
+                      <td>{t.description}</td>
+                      <td>{t.chargeAmount > 0 ? fmtCurrency(t.chargeAmount) : ""}</td>
+                      <td>{t.paymentAmount > 0 ? fmtCurrency(t.paymentAmount) : ""}</td>
+                      <td>{fmtCurrency(Math.max(0, t.runningBalance))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
         <h4 style={{ marginTop: 16, marginBottom: 8 }}>Notes</h4>
         {notes.length === 0 ? <p style={{ color: "var(--muted)" }}>No notes.</p> : notes.map((n) => (
           <p key={`print-note-${n.id}`} style={{ marginBottom: 6 }}>
@@ -924,17 +956,28 @@ export default function PropertyDetail() {
             {showPrior && property && (
               <div style={{ marginBottom: 28 }}>
                 <h3 style={{ marginBottom: 6 }}>
-                  {property.priorTenantName}, before {fmtDate(property.leaseStartDate)}
+                  {property.priorTenantName || "Previous tenant"}
+                  {property.leaseStartDate ? `, before ${fmtDate(property.leaseStartDate)}` : ""}
                 </h3>
                 <p style={{ marginTop: 0, color: "var(--muted)" }}>
-                  Received {fmtCurrency(priorReceived)}. These payments are not counted for {property.tenantName || "the current tenant"}.
+                  Still owes {fmtCurrency(priorOwed)} on {property.propertyName}. This history stays on this property.
+                  It is not part of {occupantLabel(property) || "the current tenants"}&apos;s balance.
+                  {unit && unit.includedOn.length > 0
+                    ? ` ${property.priorTenantName}'s total, including ${unit.includedOn
+                        .map((home) => home.propertyName)
+                        .join(", ")}, is ${fmtCurrency(
+                        portfolio.find((row) => row.propertyId === unit.includedOn[0].propertyId)?.householdBalance ??
+                          priorOwed
+                      )}.`
+                    : ""}
                 </p>
                 <TxnTable rows={priorTxns} property={property} setTxnAction={setTxnAction} refresh={refresh} />
               </div>
             )}
             {showPrior && property && (
               <h3 style={{ marginBottom: 12 }}>
-                {property.tenantName || "Current tenant"}, since {fmtDate(property.leaseStartDate)}
+                {occupantLabel(property) || "Current tenants"}
+                {property.leaseStartDate ? `, since ${fmtDate(property.leaseStartDate)}` : ""}
               </h3>
             )}
             <TxnTable rows={currentTxns} property={property} setTxnAction={setTxnAction} refresh={refresh} />

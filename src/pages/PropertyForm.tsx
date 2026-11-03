@@ -283,7 +283,7 @@ export default function PropertyForm() {
                 placeholder="Who lived here before the current lease"
               />
               <p style={{ color: "var(--muted)", fontSize: 14, marginTop: 8 }}>
-                Payments dated before the lease start stay with this person.
+                Charges and payments before the lease start stay with this person. They remain listed on this property and still count as money they owe. They are not subtracted from the next tenant.
               </p>
             </div>
             <div className="form-group">

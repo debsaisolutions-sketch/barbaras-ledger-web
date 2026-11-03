@@ -25,6 +25,7 @@ import {
   DEFAULT_LEDGER_PRODUCT_NAME,
   DEFAULT_LEDGER_SUBTITLE,
 } from "./store";
+import { ledgerNameForDisplay } from "./helpers";
 
 const RefreshCtx = createContext<{ key: number; refresh: () => void }>({
   key: 0,
@@ -48,7 +49,7 @@ function AppShell() {
     (async () => {
       try {
         const custom = await getLedgerDisplayName();
-        if (!cancelled) setLedgerTitle(custom || DEFAULT_LEDGER_PRODUCT_NAME);
+        if (!cancelled) setLedgerTitle(ledgerNameForDisplay(custom));
       } catch {
         if (!cancelled) setLedgerTitle(DEFAULT_LEDGER_PRODUCT_NAME);
       }
@@ -57,6 +58,10 @@ function AppShell() {
       cancelled = true;
     };
   }, [session, refreshKey]);
+
+  useEffect(() => {
+    document.title = ledgerTitle || DEFAULT_LEDGER_PRODUCT_NAME;
+  }, [ledgerTitle]);
 
   if (loading) {
     return (
