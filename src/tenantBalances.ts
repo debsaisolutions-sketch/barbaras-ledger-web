@@ -225,6 +225,22 @@ export function backRentByTenant(
   return [...grouped.values()];
 }
 
+/** Saved Active becomes Past Due when this home's current tenant still owes back rent. */
+export function propertyListStatus(property: { status?: string; carried: CarriedFromUnit[] }): string {
+  const saved = (property.status || "Active").trim() || "Active";
+  const owesBackRent = backRentByTenant(property.carried).some((line) => line.amount > 0);
+  if (owesBackRent && saved === "Active") return "Past Due";
+  return saved;
+}
+
+export function matchesPropertyStatusFilter(
+  property: { status?: string; carried: CarriedFromUnit[] },
+  filter: string
+): boolean {
+  if (filter === "All") return true;
+  return propertyListStatus(property) === filter;
+}
+
 export function summarizePropertyMoney(
   properties: BalanceProperty[],
   transactions: BalanceTransaction[],
