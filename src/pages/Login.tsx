@@ -27,7 +27,7 @@ export default function Login() {
       if (error) {
         // AuthContext logs detailed Supabase auth errors for sign-in; keep UI message readable.
         if (import.meta.env.DEV && mode === "signin") {
-          console.error("[Barbara Login Debug] Login.tsx UI error message:", error.message);
+          console.error("[EasyLedger Login Debug] Login.tsx UI error message:", error.message);
         }
         setMessage(error.message);
         return;

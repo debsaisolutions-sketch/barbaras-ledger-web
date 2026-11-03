@@ -14,7 +14,7 @@ import {
   type Property,
   type Loan,
 } from "../store";
-import { fmtCurrency, fmtDate } from "../helpers";
+import { fmtCurrency, fmtDate, ledgerNameForDisplay } from "../helpers";
 import { occupantLabel } from "../occupants";
 
 export default function Reports() {
@@ -53,7 +53,7 @@ export default function Reports() {
       setAllNotes(notes);
       setAllProps(properties);
       setAllLoans(loans);
-      setLedgerTitle(customName || "EasyLedger");
+      setLedgerTitle(ledgerNameForDisplay(customName));
       setGenerated(true);
     } catch (e) {
       alert((e as Error).message || "Could not generate reports.");

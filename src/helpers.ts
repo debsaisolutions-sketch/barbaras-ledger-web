@@ -1,3 +1,25 @@
+const EASYLEDGER_NAME = "EasyLedger";
+
+/** Show EasyLedger when the saved menu name is blank or still the old Barbara name. */
+export function ledgerNameForDisplay(stored: string | null | undefined): string {
+  const trimmed = String(stored ?? "").trim().replace(/\s+/g, " ");
+  const folded = trimmed.toLowerCase().replace(/[’‘]/g, "'");
+  const compact = folded.replace(/'/g, "");
+  const legacy =
+    folded === "barbara" ||
+    folded === "barbara's" ||
+    folded === "barbaras" ||
+    folded === "barbara ledger" ||
+    folded === "barbara's ledger" ||
+    folded === "barbaras ledger" ||
+    compact === "barbara" ||
+    compact === "barbaras" ||
+    compact === "barbara ledger" ||
+    compact === "barbaras ledger";
+  if (!trimmed || legacy) return EASYLEDGER_NAME;
+  return trimmed;
+}
+
 export function fmtCurrency(n: number): string {
   return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }

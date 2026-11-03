@@ -3,9 +3,9 @@ import { useNavigate } from "react-router-dom";
 import {
   getProperties,
   getAllPropertyTransactions,
-  calculatePropertyBalance,
   type Property,
 } from "../store";
+import { summarizePropertyMoney, type PropertyMoney } from "../tenantBalances";
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
 import { occupantLabel } from "../occupants";
 import { useRefresh } from "../App";
@@ -15,7 +15,7 @@ export default function Properties() {
   const { key } = useRefresh();
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
-  const [properties, setProperties] = useState<(Property & { balance: number })[]>([]);
+  const [properties, setProperties] = useState<(Property & PropertyMoney)[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,10 +25,21 @@ export default function Properties() {
         setLoading(true);
         const [props, txns] = await Promise.all([getProperties(), getAllPropertyTransactions()]);
         if (cancelled) return;
-        const enriched = props.map((p) => ({
-          ...p,
-          balance: calculatePropertyBalance(txns.filter((t) => t.propertyId === p.id)),
-        }));
+        const summary = summarizePropertyMoney(props, txns, new Date().toISOString().slice(0, 10));
+        const enriched = props.map((p) => {
+          const money = summary.find((row) => row.propertyId === p.id);
+          return {
+            ...p,
+            propertyId: p.id,
+            propertyName: p.propertyName,
+            currentBalance: money?.currentBalance ?? 0,
+            priorBalance: money?.priorBalance ?? 0,
+            priorTenantName: money?.priorTenantName ?? p.priorTenantName,
+            carried: money?.carried ?? [],
+            householdBalance: money?.householdBalance ?? 0,
+            includedOn: money?.includedOn ?? [],
+          };
+        });
         setProperties(enriched);
       } catch (e) {
         if (!cancelled) alert((e as Error).message || "Could not load properties.");
@@ -47,7 +58,7 @@ export default function Properties() {
     .filter(
       (p) =>
         !search ||
-        [p.propertyName, p.tenantName, p.coTenantName, p.address].some((f) =>
+        [p.propertyName, p.tenantName, p.coTenantName, p.priorTenantName, p.address].some((f) =>
           f?.toLowerCase().includes(search.toLowerCase())
         )
     );
@@ -125,13 +136,29 @@ export default function Properties() {
                   </>
                 ) : null}
               </div>
+              {p.carried.length > 0 && (
+                <div className="item-subtitle">
+                  Includes{" "}
+                  {p.carried
+                    .map((item) => `${fmtCurrency(item.amount)} still open on ${item.propertyName}`)
+                    .join(", ")}
+                </div>
+              )}
+              {p.priorBalance > 0 && (
+                <div className="item-subtitle" style={{ color: "var(--error)" }}>
+                  {p.priorTenantName || "Previous tenant"} still owes {fmtCurrency(p.priorBalance)} on this unit
+                  {p.includedOn.length > 0
+                    ? ` (included in the total on ${p.includedOn.map((home) => home.propertyName).join(", ")})`
+                    : ""}
+                </div>
+              )}
             </div>
             <div className="item-right">
               <div
                 className="item-amount"
-                style={{ color: p.balance > 0 ? "var(--error)" : "var(--success)" }}
+                style={{ color: p.householdBalance > 0 ? "var(--error)" : "var(--success)" }}
               >
-                {p.balance > 0 ? `${fmtCurrency(p.balance)} due` : "Paid up"}
+                {p.householdBalance > 0 ? `${fmtCurrency(p.householdBalance)} due` : "Paid up"}
               </div>
               <span className={`badge ${statusBadge(p.status)}`}>{p.status}</span>
             </div>
