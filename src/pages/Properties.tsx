@@ -5,7 +5,13 @@ import {
   getAllPropertyTransactions,
   type Property,
 } from "../store";
-import { backRentByTenant, summarizePropertyMoney, type PropertyMoney } from "../tenantBalances";
+import {
+  backRentByTenant,
+  matchesPropertyStatusFilter,
+  propertyListStatus,
+  summarizePropertyMoney,
+  type PropertyMoney,
+} from "../tenantBalances";
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
 import { occupantLabel } from "../occupants";
 import { useRefresh } from "../App";
@@ -17,6 +23,8 @@ export function RentalPropertyCard({
   property: Property & PropertyMoney;
   onOpen: () => void;
 }) {
+  const shownStatus = propertyListStatus(p);
+  const backRent = backRentByTenant(p.carried);
   return (
     <div className="list-item" onClick={onOpen}>
       <span className="item-icon">🏠</span>
@@ -33,7 +41,7 @@ export function RentalPropertyCard({
             </>
           ) : null}
         </div>
-        {backRentByTenant(p.carried).map((line) => (
+        {backRent.map((line) => (
           <div key={line.tenantName} className="item-subtitle" style={{ color: "var(--error)" }}>
             {line.tenantName} back rent: {fmtCurrency(line.amount)}
           </div>
@@ -51,7 +59,12 @@ export function RentalPropertyCard({
         >
           {p.currentBalance > 0 ? `${fmtCurrency(p.currentBalance)} due` : "Paid up"}
         </div>
-        <span className={`badge ${statusBadge(p.status)}`}>{p.status}</span>
+        {backRent.map((line) => (
+          <div key={line.tenantName} style={{ color: "var(--error)", fontWeight: 700, fontSize: 14 }}>
+            Back rent {fmtCurrency(line.amount)}
+          </div>
+        ))}
+        <span className={`badge ${statusBadge(shownStatus)}`}>{shownStatus}</span>
       </div>
       <span className="item-arrow">›</span>
     </div>
@@ -102,7 +115,7 @@ export default function Properties() {
 
   const filters = ["All", "Active", "Past Due", "Vacant", "Sold", "Closed"];
   const filtered = properties
-    .filter((p) => filter === "All" || p.status === filter)
+    .filter((p) => matchesPropertyStatusFilter(p, filter))
     .filter(
       (p) =>
         !search ||

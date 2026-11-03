@@ -31,6 +31,7 @@ import { useRefresh } from "../App";
 import { downloadDocumentFile, openDocumentInNewTab } from "../documentFiles";
 import {
   backRentByTenant,
+  propertyListStatus,
   transactionBelongsToPriorTenant,
   summarizePropertyMoney,
   type CarriedFromUnit,
@@ -196,6 +197,9 @@ export default function PropertyDetail() {
   const currentOnlyBalance = unit?.currentBalance ?? 0;
   const priorOwed = unit?.priorBalance ?? 0;
   const priorShownHere = priorOwed > 0 && (unit?.includedOn.length ?? 0) === 0;
+  const shownStatus = property
+    ? propertyListStatus({ status: property.status, carried: unit?.carried ?? [] })
+    : "";
   const expenseTotal = expenses.reduce((s, e) => s + e.amount, 0);
   const priorSource = property ? txns.filter((t) => rowIsPrior(property, t)) : [];
   const showPrior = priorSource.length > 0;
@@ -398,7 +402,7 @@ export default function PropertyDetail() {
             <div className="detail-subtitle">{property.address}</div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <span className={`badge ${statusBadge(property.status)}`}>{property.status}</span>
+            <span className={`badge ${statusBadge(shownStatus)}`}>{shownStatus}</span>
           </div>
         </div>
         {property.status === "Sold" && (
@@ -849,7 +853,7 @@ export default function PropertyDetail() {
           <div className="detail-info-item"><label>Contact</label><p>{[property.tenantPhone, property.coTenantPhone, property.tenantEmail, property.coTenantEmail, property.tenantContact].filter(Boolean).join(" · ") || "—"}</p></div>
           <div className="detail-info-item"><label>Rent</label><p>{fmtCurrency(property.monthlyRent)}</p></div>
           <div className="detail-info-item"><label>Due day</label><p>{property.rentDueDay || "—"}</p></div>
-          <div className="detail-info-item"><label>Status</label><p>{property.status}</p></div>
+          <div className="detail-info-item"><label>Status</label><p>{shownStatus}</p></div>
           <div className="detail-info-item"><label>Owed by {occupantLabel(property) || "current tenants"}</label><p>{fmtCurrency(Math.max(0, currentOnlyBalance))}</p></div>
           {unit
             ? backRentByTenant(unit.carried).map((line) => (

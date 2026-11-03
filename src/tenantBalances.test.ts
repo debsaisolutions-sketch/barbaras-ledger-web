@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { BalanceProperty, BalanceTransaction } from "./tenantBalances";
 import {
+  matchesPropertyStatusFilter,
   owedOnSchedule,
+  propertyListStatus,
   summarizePropertyMoney,
   transactionBelongsToPriorTenant,
   unpaidRentForProperties,
@@ -153,6 +155,16 @@ describe("per-tenant balances", () => {
     ]);
     expect(rvMoney?.includedOn.map((home) => home.propertyName)).toEqual(["Downstairs"]);
     expect(rvMoney?.currentBalance).toBe(100);
+    expect(propertyListStatus({ status: "Active", carried: downMoney?.carried ?? [] })).toBe("Past Due");
+    expect(propertyListStatus({ status: "Active", carried: rvMoney?.carried ?? [] })).toBe("Active");
+    expect(matchesPropertyStatusFilter({ status: "Active", carried: downMoney?.carried ?? [] }, "Past Due")).toBe(
+      true
+    );
+    expect(matchesPropertyStatusFilter({ status: "Active", carried: downMoney?.carried ?? [] }, "Active")).toBe(
+      false
+    );
+    expect(matchesPropertyStatusFilter({ status: "Active", carried: [] }, "Past Due")).toBe(false);
+    expect(propertyListStatus({ status: "Sold", carried: downMoney?.carried ?? [] })).toBe("Sold");
   });
 
   it("uses the November 3 payment on the earlier shortfall, not as a credit", () => {
