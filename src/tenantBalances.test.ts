@@ -100,7 +100,7 @@ describe("per-tenant balances", () => {
     expect(downMoney?.currentBalance).toBe(200);
     expect(downMoney?.householdBalance).toBe(4159.48);
     expect(downMoney?.carried).toEqual([
-      { propertyId: "rv", propertyName: "RV", amount: 3959.48 },
+      { propertyId: "rv", propertyName: "RV", amount: 3959.48, tenantName: "Connie Williams" },
     ]);
     expect(unpaidRentForProperties([rv, downstairs], summary)).toBe(4259.48);
     expect(rvMoney && rvMoney.priorBalance + rvMoney.currentBalance).not.toBe(2859.48);
@@ -141,6 +141,107 @@ describe("per-tenant balances", () => {
         currentTenantNames: ["Chris Campbell", "Madesyn Jones"],
       })
     ).toBe(false);
+  });
+
+  it("treats Connie Pryor and Connie Williams as the same tenant", () => {
+    const rvPryor = { ...rv, priorTenantName: "Connie Pryor" };
+    const summary = summarizePropertyMoney([rvPryor, downstairs], rows, today);
+    const downMoney = summary.find((row) => row.propertyId === "down");
+    const rvMoney = summary.find((row) => row.propertyId === "rv");
+    expect(downMoney?.carried).toEqual([
+      { propertyId: "rv", propertyName: "RV", amount: 3959.48, tenantName: "Connie Williams" },
+    ]);
+    expect(rvMoney?.includedOn.map((home) => home.propertyName)).toEqual(["Downstairs"]);
+    expect(rvMoney?.currentBalance).toBe(100);
+  });
+
+  it("uses the November 3 payment on the earlier shortfall, not as a credit", () => {
+    const withCash = [
+      ...rows,
+      txn({ id: "chris-4", propertyId: "rv", date: "2026-11-03", paymentAmount: 100 }),
+    ];
+    const summary = summarizePropertyMoney([rv, downstairs], withCash, today);
+    const rvMoney = summary.find((row) => row.propertyId === "rv");
+    const downMoney = summary.find((row) => row.propertyId === "down");
+    expect(rvMoney?.currentBalance).toBe(0);
+    expect(rvMoney?.householdBalance).toBe(0);
+    expect(rvMoney?.priorBalance).toBe(3959.48);
+    expect(downMoney?.carried[0].amount).toBe(3959.48);
+    expect(unpaidRentForProperties([rv, downstairs], summary)).toBe(4159.48);
+  });
+
+  it("keeps a real October 31 balance when that period is the one on the schedule", () => {
+    const leaseAnchored = {
+      ...rv,
+      rentAnchorDate: "2026-09-19",
+    };
+    const currentPays = [
+      txn({ id: "chris-1", propertyId: "rv", date: "2026-09-24", paymentAmount: 300 }),
+      txn({ id: "chris-2", propertyId: "rv", date: "2026-10-07", paymentAmount: 400 }),
+      txn({ id: "chris-3", propertyId: "rv", date: "2026-10-21", paymentAmount: 400 }),
+      txn({ id: "chris-4", propertyId: "rv", date: "2026-11-03", paymentAmount: 100 }),
+    ];
+    const owed = owedOnSchedule(
+      {
+        frequency: "biweekly",
+        expectedAmount: 400,
+        dueDay: 1,
+        anchorDate: "2026-09-19",
+        intervalDays: null,
+        leaseStart: "2026-09-19",
+      },
+      currentPays,
+      today
+    );
+    expect(owed).toBe(400);
+    const summary = summarizePropertyMoney([leaseAnchored], currentPays, today);
+    expect(summary[0].currentBalance).toBe(400);
+  });
+
+  it("drops a voided prorated charge from the unit and from back rent", () => {
+    const summary = summarizePropertyMoney(
+      [downstairs, rv],
+      [
+        ...rows,
+        txn({
+          id: "void-prorate",
+          propertyId: "down",
+          date: "2026-09-20",
+          type: "charge",
+          chargeAmount: 400,
+          voidedAt: "2026-09-21T00:00:00Z",
+        }),
+        txn({
+          id: "void-prior",
+          propertyId: "rv",
+          date: "2026-01-20",
+          type: "charge",
+          chargeAmount: 400,
+          voidedAt: "2026-01-21T00:00:00Z",
+        }),
+      ],
+      today
+    );
+    const downMoney = summary.find((row) => row.propertyId === "down");
+    const rvMoney = summary.find((row) => row.propertyId === "rv");
+    expect(downMoney?.currentBalance).toBe(200);
+    expect(rvMoney?.priorBalance).toBe(3959.48);
+    expect(downMoney?.carried[0].amount).toBe(3959.48);
+  });
+
+  it("applies rent paid beyond the current lease to that person's back rent", () => {
+    const summary = summarizePropertyMoney(
+      [rv, downstairs],
+      [
+        ...rows,
+        txn({ id: "down-pay", propertyId: "down", date: "2026-10-01", paymentAmount: 250 }),
+      ],
+      today
+    );
+    const downMoney = summary.find((row) => row.propertyId === "down");
+    expect(downMoney?.currentBalance).toBe(0);
+    expect(downMoney?.carried[0].amount).toBe(3909.48);
+    expect(summary.find((row) => row.propertyId === "rv")?.priorBalance).toBe(3909.48);
   });
 
   it("matches a prior tenant name without caring about case", () => {

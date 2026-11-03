@@ -47,6 +47,12 @@ export interface RentPeriodSummary extends RentPeriod {
   remaining: number;
   status: RentPeriodStatus;
   paymentIds: string[];
+  /** Part of this period's payments used on earlier unpaid rent. */
+  appliedToEarlierRent: number;
+  /** Amount of a later payment counted toward this period. */
+  coveredByLaterPayment: number;
+  /** Cash above the rent already due. Not a credit and not paid ahead. */
+  unappliedExtra: number;
 }
 
 export interface RentScheduleInput {
@@ -300,6 +306,9 @@ export function summarizePeriod(
     remaining: remainingRent(period.expected, received),
     status: rentPeriodStatus(period.expected, received, period.end, today, period.start),
     paymentIds: matched.map((p) => p.id),
+    appliedToEarlierRent: 0,
+    coveredByLaterPayment: 0,
+    unappliedExtra: 0,
   };
 }
 
@@ -351,12 +360,94 @@ export function visibleRentPeriods(
     .sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
 }
 
+/**
+ * Fill each period up to its rent. Anything above that is not a credit and
+ * does not prepay a later period: it pays earlier unpaid rent, oldest first,
+ * after the current period is full.
+ */
 export function summarizeVisiblePeriods(
   schedule: RentScheduleInput,
   payments: RentPaymentInput[],
   today: string
 ): RentPeriodSummary[] {
-  return visibleRentPeriods(schedule, payments, today).map((p) => summarizePeriod(p, payments, today));
+  const periods = visibleRentPeriods(schedule, payments, today);
+  const direct = periods.map((period) => summarizePeriod(period, payments, today));
+  const counted = direct.map(() => 0);
+  const fromLater = direct.map(() => 0);
+  const sentEarlier = direct.map(() => 0);
+  let surplus = 0;
+
+  direct.forEach((period, index) => {
+    const upcoming = period.start > today;
+    if (upcoming) {
+      surplus = money(surplus + period.received);
+      sentEarlier[index] = period.received;
+      return;
+    }
+    const keep = Math.min(period.received, period.expected);
+    const extra = money(period.received - keep);
+    counted[index] = money(keep);
+    sentEarlier[index] = extra;
+    surplus = money(surplus + extra);
+  });
+
+  const currentIndex = direct.findIndex((period) => period.start <= today && today <= period.end);
+  const order: number[] = [];
+  if (currentIndex >= 0) order.push(currentIndex);
+  direct.forEach((period, index) => {
+    if (index === currentIndex || period.start > today) return;
+    order.push(index);
+  });
+
+  for (const index of order) {
+    if (surplus <= 0.009) break;
+    const need = money(direct[index].expected - counted[index]);
+    if (need <= 0.009) continue;
+    const give = Math.min(need, surplus);
+    counted[index] = money(counted[index] + give);
+    fromLater[index] = money(fromLater[index] + give);
+    surplus = money(surplus - give);
+  }
+
+  const unappliedExtra = direct.map(() => 0);
+  let unused = surplus;
+  for (let index = sentEarlier.length - 1; index >= 0 && unused > 0.009; index -= 1) {
+    const take = Math.min(sentEarlier[index], unused);
+    sentEarlier[index] = money(sentEarlier[index] - take);
+    unused = money(unused - take);
+    unappliedExtra[index] = money(take);
+  }
+
+  return direct.map((period, index) => {
+    const received = money(counted[index]);
+    const upcoming = period.start > today && received <= 0.009;
+    let status = rentPeriodStatus(period.expected, received, period.end, today, period.start);
+    if (upcoming) status = "Upcoming";
+    if (status === "Overpaid") status = "Paid";
+    return {
+      ...period,
+      received,
+      remaining: remainingRent(period.expected, received),
+      status,
+      appliedToEarlierRent: money(sentEarlier[index]),
+      coveredByLaterPayment: money(fromLater[index]),
+      unappliedExtra: money(unappliedExtra[index]),
+    };
+  });
+}
+
+/** Rent cash that remains after current and earlier rent are full. Not a credit. */
+export function unappliedRentSurplus(
+  schedule: RentScheduleInput,
+  payments: RentPaymentInput[],
+  today: string
+): number {
+  const periods = summarizeVisiblePeriods(schedule, payments, today);
+  const counted = money(periods.reduce((sum, period) => sum + period.received, 0));
+  const paid = money(
+    payments.filter(isRentPayment).reduce((sum, payment) => sum + money(payment.amount), 0)
+  );
+  return Math.max(0, money(paid - counted));
 }
 
 /** A payment before the current lease start belongs to the previous tenant. */
