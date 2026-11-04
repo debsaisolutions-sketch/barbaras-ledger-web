@@ -8,11 +8,15 @@ import {
   normalizeRepairPriority,
   normalizeRepairStatus,
   optionalMoney,
-  unpaidForDashboard,
   type RentFrequency,
   type RepairPriority,
   type RepairStatus,
 } from "./rentSchedule";
+import {
+  summarizePropertyMoney,
+  transactionTenantLabel,
+  unpaidRentForProperties,
+} from "./tenantBalances";
 
 export type PropertyStatus = "Active" | "Vacant" | "Past Due" | "Closed" | "Sold";
 export type LoanStatus = "Active" | "Paid Off" | "Past Due" | "Written Off";
@@ -174,6 +178,8 @@ export interface PropertyTransaction {
   rentPeriodEnd: string;
   voidedAt: string;
   voidReason: string;
+  /** Saved on the row when the database column exists. Blank uses the lease date. */
+  tenantName: string;
   createdAt: string;
 }
 
@@ -281,7 +287,7 @@ export interface ActivityItem {
   description: string;
 }
 
-// ============ Barbara-only Supabase names ============
+// ============ Supabase table names (do not rename) ============
 const T = {
   PROPERTIES: "barbara_properties",
   PROP_TXN: "barbara_property_transactions",
@@ -420,6 +426,7 @@ function mapPropTxn(row: Record<string, unknown>): PropertyTransaction {
     rentPeriodEnd: dateStr(row.rent_period_end),
     voidedAt: row.voided_at ? String(row.voided_at) : "",
     voidReason: String(row.void_reason ?? ""),
+    tenantName: String(row.tenant_name ?? ""),
     createdAt: String(row.created_at ?? ""),
   };
 }
@@ -901,13 +908,38 @@ export async function getAllPropertyTransactions(): Promise<PropertyTransaction[
   return (data ?? []).map((r) => mapPropTxn(r as Record<string, unknown>));
 }
 
+function missingTenantColumn(message: string): boolean {
+  return /tenant_name/i.test(message) && /schema cache|does not exist|could not find|column/i.test(message);
+}
+
+async function insertPropertyTransactionRow(row: Record<string, unknown>) {
+  const first = await supabase.from(T.PROP_TXN).insert(row).select("*").single();
+  if (!first.error || row.tenant_name === undefined || !missingTenantColumn(first.error.message)) {
+    return first;
+  }
+  const withoutTenant = { ...row };
+  delete withoutTenant.tenant_name;
+  return supabase.from(T.PROP_TXN).insert(withoutTenant).select("*").single();
+}
+
 export async function addPropertyTransaction(
-  data: Omit<PropertyTransaction, "id" | "createdAt" | "voidedAt" | "voidReason" | "rentPeriodStart" | "rentPeriodEnd"> & {
+  data: Omit<PropertyTransaction, "id" | "createdAt" | "voidedAt" | "voidReason" | "rentPeriodStart" | "rentPeriodEnd" | "tenantName"> & {
     rentPeriodStart?: string;
     rentPeriodEnd?: string;
+    tenantName?: string;
   }
 ): Promise<PropertyTransaction> {
   const user = await requireUser();
+  const property = await getProperty(data.propertyId);
+  const tenantLabel = property
+    ? transactionTenantLabel({
+        date: data.date,
+        explicitTenantName: data.tenantName,
+        leaseStart: property.leaseStartDate,
+        priorTenantName: property.priorTenantName,
+        currentTenantNames: [property.tenantName, property.coTenantName],
+      })
+    : (data.tenantName || "").trim();
   const row = {
     user_id: user.id,
     property_id: data.propertyId,
@@ -923,11 +955,11 @@ export async function addPropertyTransaction(
     notes: data.notes,
     rent_period_start: data.rentPeriodStart || null,
     rent_period_end: data.rentPeriodEnd || null,
+    tenant_name: tenantLabel,
   };
-  const { data: inserted, error } = await supabase.from(T.PROP_TXN).insert(row).select("*").single();
+  const { data: inserted, error } = await insertPropertyTransactionRow(row);
   if (error) throw new Error(error.message);
   const txn = mapPropTxn(inserted as Record<string, unknown>);
-  const property = await getProperty(data.propertyId);
   if (property) {
     const actType =
       data.type === "payment" ? "payment" : data.type === "late_fee" ? "late_fee" : "charge";
@@ -937,12 +969,7 @@ export async function addPropertyTransaction(
       entityType: "property",
       entityId: data.propertyId,
       entityName: property.propertyName,
-      personName:
-        property.priorTenantName &&
-        property.leaseStartDate &&
-        data.date < property.leaseStartDate
-          ? property.priorTenantName
-          : property.tenantName,
+      personName: tenantLabel || property.tenantName,
       amount:
         data.type === "payment" ? data.paymentAmount : data.chargeAmount,
       description: data.description || data.type,
@@ -1845,22 +1872,8 @@ export async function getDashboardStats(year?: number) {
     .filter((t) => t.type === "late_fee")
     .reduce((s, t) => s + t.chargeAmount, 0);
   const today = todayStr();
-  let unpaidRent = 0;
-  for (const p of properties.filter((p) => p.status === "Active" || p.status === "Past Due")) {
-    unpaidRent += unpaidForDashboard({
-      schedule: {
-        frequency: p.rentFrequency,
-        expectedAmount: p.monthlyRent,
-        dueDay: p.rentDueDay,
-        anchorDate: p.rentAnchorDate,
-        intervalDays: p.rentIntervalDays,
-        leaseStart: p.leaseStartDate,
-        skippedPeriods: p.skippedRentPeriods,
-      },
-      transactions: propTxns.filter((t) => t.propertyId === p.id),
-      today,
-    });
-  }
+  const propertyMoney = summarizePropertyMoney(properties, propTxns, today);
+  const unpaidRent = unpaidRentForProperties(properties, propertyMoney);
   // They owe me (+) ; I owe them (−).
   let openLoanBalances = 0;
   for (const l of loans.filter((l) => l.status === "Active" || l.status === "Past Due")) {
@@ -1900,6 +1913,7 @@ export async function generatePropertyTaxReport(year: number): Promise<PropertyT
     getAllPropertyTransactions(),
     getAllPropertyExpenses(),
   ]);
+  const moneyRows = summarizePropertyMoney(properties, allTxns, todayStr());
   const reports: PropertyTaxReport[] = [];
   for (const property of properties) {
     const propTxns = allTxns.filter((t) => t.propertyId === property.id);
@@ -1928,7 +1942,9 @@ export async function generatePropertyTaxReport(year: number): Promise<PropertyT
       totalLateFees,
       totalOtherCharges,
       totalPayments,
-      unpaidBalance: calculatePropertyBalance(propTxns),
+      unpaidBalance:
+        (moneyRows.find((row) => row.propertyId === property.id)?.currentBalance ?? 0) +
+        (moneyRows.find((row) => row.propertyId === property.id)?.priorBalance ?? 0),
       transactions: yearTxns,
       expenses: yearExpenses,
       totalExpenses,

@@ -26,7 +26,7 @@ import {
   type Note,
   type Document as Doc,
 } from "../store";
-import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
+import { fmtCurrency, fmtDate, ledgerNameForDisplay, statusBadge } from "../helpers";
 import { useRefresh } from "../App";
 import { downloadDocumentFile, openDocumentInNewTab } from "../documentFiles";
 import NotesList from "../components/NotesList";
@@ -102,7 +102,7 @@ export default function LoanDetail() {
     (async () => {
       try {
         const custom = await getLedgerDisplayName();
-        if (!cancelled && custom) setLedgerTitle(custom);
+        if (!cancelled) setLedgerTitle(ledgerNameForDisplay(custom));
       } catch {
         /* keep default */
       }

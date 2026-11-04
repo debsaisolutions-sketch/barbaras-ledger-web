@@ -3,19 +3,80 @@ import { useNavigate } from "react-router-dom";
 import {
   getProperties,
   getAllPropertyTransactions,
-  calculatePropertyBalance,
   type Property,
 } from "../store";
+import {
+  backRentByTenant,
+  matchesPropertyStatusFilter,
+  propertyListStatus,
+  summarizePropertyMoney,
+  type PropertyMoney,
+} from "../tenantBalances";
 import { fmtCurrency, fmtDate, statusBadge } from "../helpers";
 import { occupantLabel } from "../occupants";
 import { useRefresh } from "../App";
+
+export function RentalPropertyCard({
+  property: p,
+  onOpen,
+}: {
+  property: Property & PropertyMoney;
+  onOpen: () => void;
+}) {
+  const shownStatus = propertyListStatus(p);
+  const backRent = backRentByTenant(p.carried);
+  return (
+    <div className="list-item" onClick={onOpen}>
+      <span className="item-icon">🏠</span>
+      <div className="item-content">
+        <div className="item-title">{p.propertyName}</div>
+        <div className="item-subtitle">
+          {occupantLabel(p) || "No tenant"} · {p.address}
+          {p.status === "Sold" && (p.salePrice != null || p.soldDate) ? (
+            <>
+              {" "}
+              · Sold
+              {p.soldDate ? ` ${fmtDate(p.soldDate)}` : ""}
+              {p.salePrice != null ? ` · ${fmtCurrency(p.salePrice)}` : ""}
+            </>
+          ) : null}
+        </div>
+        {backRent.map((line) => (
+          <div key={line.tenantName} className="item-subtitle" style={{ color: "var(--error)" }}>
+            {line.tenantName} back rent: {fmtCurrency(line.amount)}
+          </div>
+        ))}
+        {p.priorBalance > 0 && p.includedOn.length === 0 && (
+          <div className="item-subtitle" style={{ color: "var(--error)" }}>
+            {p.priorTenantName || "Previous tenant"} still owes {fmtCurrency(p.priorBalance)} on this unit
+          </div>
+        )}
+      </div>
+      <div className="item-right">
+        <div
+          className="item-amount"
+          style={{ color: p.currentBalance > 0 ? "var(--error)" : "var(--success)" }}
+        >
+          {p.currentBalance > 0 ? `${fmtCurrency(p.currentBalance)} due` : "Paid up"}
+        </div>
+        {backRent.map((line) => (
+          <div key={line.tenantName} style={{ color: "var(--error)", fontWeight: 700, fontSize: 14 }}>
+            Back rent {fmtCurrency(line.amount)}
+          </div>
+        ))}
+        <span className={`badge ${statusBadge(shownStatus)}`}>{shownStatus}</span>
+      </div>
+      <span className="item-arrow">›</span>
+    </div>
+  );
+}
 
 export default function Properties() {
   const navigate = useNavigate();
   const { key } = useRefresh();
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
-  const [properties, setProperties] = useState<(Property & { balance: number })[]>([]);
+  const [properties, setProperties] = useState<(Property & PropertyMoney)[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,10 +86,21 @@ export default function Properties() {
         setLoading(true);
         const [props, txns] = await Promise.all([getProperties(), getAllPropertyTransactions()]);
         if (cancelled) return;
-        const enriched = props.map((p) => ({
-          ...p,
-          balance: calculatePropertyBalance(txns.filter((t) => t.propertyId === p.id)),
-        }));
+        const summary = summarizePropertyMoney(props, txns, new Date().toISOString().slice(0, 10));
+        const enriched = props.map((p) => {
+          const money = summary.find((row) => row.propertyId === p.id);
+          return {
+            ...p,
+            propertyId: p.id,
+            propertyName: p.propertyName,
+            currentBalance: money?.currentBalance ?? 0,
+            priorBalance: money?.priorBalance ?? 0,
+            priorTenantName: money?.priorTenantName ?? p.priorTenantName,
+            carried: money?.carried ?? [],
+            householdBalance: money?.householdBalance ?? 0,
+            includedOn: money?.includedOn ?? [],
+          };
+        });
         setProperties(enriched);
       } catch (e) {
         if (!cancelled) alert((e as Error).message || "Could not load properties.");
@@ -43,11 +115,11 @@ export default function Properties() {
 
   const filters = ["All", "Active", "Past Due", "Vacant", "Sold", "Closed"];
   const filtered = properties
-    .filter((p) => filter === "All" || p.status === filter)
+    .filter((p) => matchesPropertyStatusFilter(p, filter))
     .filter(
       (p) =>
         !search ||
-        [p.propertyName, p.tenantName, p.coTenantName, p.address].some((f) =>
+        [p.propertyName, p.tenantName, p.coTenantName, p.priorTenantName, p.address].some((f) =>
           f?.toLowerCase().includes(search.toLowerCase())
         )
     );
@@ -110,33 +182,7 @@ export default function Properties() {
         </div>
       ) : (
         filtered.map((p) => (
-          <div key={p.id} className="list-item" onClick={() => navigate(`/properties/${p.id}`)}>
-            <span className="item-icon">🏠</span>
-            <div className="item-content">
-              <div className="item-title">{p.propertyName}</div>
-              <div className="item-subtitle">
-                {occupantLabel(p) || "No tenant"} · {p.address}
-                {p.status === "Sold" && (p.salePrice != null || p.soldDate) ? (
-                  <>
-                    {" "}
-                    · Sold
-                    {p.soldDate ? ` ${fmtDate(p.soldDate)}` : ""}
-                    {p.salePrice != null ? ` · ${fmtCurrency(p.salePrice)}` : ""}
-                  </>
-                ) : null}
-              </div>
-            </div>
-            <div className="item-right">
-              <div
-                className="item-amount"
-                style={{ color: p.balance > 0 ? "var(--error)" : "var(--success)" }}
-              >
-                {p.balance > 0 ? `${fmtCurrency(p.balance)} due` : "Paid up"}
-              </div>
-              <span className={`badge ${statusBadge(p.status)}`}>{p.status}</span>
-            </div>
-            <span className="item-arrow">›</span>
-          </div>
+          <RentalPropertyCard key={p.id} property={p} onOpen={() => navigate(`/properties/${p.id}`)} />
         ))
       )}
     </div>
