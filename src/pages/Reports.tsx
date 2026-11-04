@@ -7,6 +7,7 @@ import {
   getProperties,
   getLoans,
   getLedgerDisplayName,
+  loanDisplayTitle,
   type PropertyTaxReport,
   type LoanTaxReport,
   type Document,
@@ -64,7 +65,6 @@ export default function Reports() {
 
   const totalRentalIncome = propReports.reduce((s, r) => s + r.totalPayments, 0);
   const totalPropertyExpenses = propReports.reduce((s, r) => s + r.totalExpenses, 0);
-  const totalLoanPayments = loanReports.reduce((s, r) => s + r.totalPayments, 0);
   const outstandingBalances =
     propReports.reduce((s, r) => s + r.unpaidBalance, 0) +
     loanReports.reduce((s, r) => s + r.currentBalance, 0);
@@ -78,8 +78,14 @@ export default function Reports() {
   const findPropertyName = (id: string) => allProps.find((p) => p.id === id)?.propertyName || "Property";
   const findLoanName = (id: string) => {
     const l = allLoans.find((x) => x.id === id);
-    return l ? `Loan to ${l.borrowerName}` : "Loan";
+    return l ? loanDisplayTitle(l) : "Loan";
   };
+  const takenLoanPayments = loanReports
+    .filter((r) => r.loan.direction === "taken")
+    .reduce((s, r) => s + r.totalPayments, 0);
+  const givenLoanPayments = loanReports
+    .filter((r) => r.loan.direction !== "taken")
+    .reduce((s, r) => s + r.totalPayments, 0);
 
   return (
     <div>
@@ -138,11 +144,14 @@ export default function Reports() {
               {propReports.length > 0 && (
                 <div className="card"><div className="stat-label">Total Repairs &amp; Expenses</div><div className="stat-value">{fmtCurrency(totalPropertyExpenses)}</div></div>
               )}
-              {loanReports.length > 0 && (
-                <div className="card"><div className="stat-label">Total Loan Payments Received</div><div className="stat-value green">{fmtCurrency(totalLoanPayments)}</div></div>
+              {loanReports.length > 0 && givenLoanPayments > 0 && (
+                <div className="card"><div className="stat-label">Loan Payments Received (I lent)</div><div className="stat-value green">{fmtCurrency(givenLoanPayments)}</div></div>
+              )}
+              {loanReports.length > 0 && takenLoanPayments > 0 && (
+                <div className="card"><div className="stat-label">Loan Payments I Made (I owe)</div><div className="stat-value">{fmtCurrency(takenLoanPayments)}</div></div>
               )}
               <div className="card"><div className="stat-label">Outstanding Balances</div><div className="stat-value orange">{fmtCurrency(outstandingBalances)}</div></div>
-              <div className="card"><div className="stat-label">Total Payments Received (rent + loans)</div><div className="stat-value">{fmtCurrency(totalRentalIncome + totalLoanPayments)}</div></div>
+              <div className="card"><div className="stat-label">Money received (rent + loans I lent)</div><div className="stat-value">{fmtCurrency(totalRentalIncome + givenLoanPayments)}</div></div>
             </div>
           </div>
 
@@ -239,10 +248,12 @@ export default function Reports() {
               <h3 className="section-title">Personal Loan Reports</h3>
               {loanReports.map(r => (
                 <div key={r.loan.id} className="card" style={{ marginBottom: 16 }}>
-                  <h4 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Loan to {r.loan.borrowerName}</h4>
-                  <div style={{ fontSize: 14, color: "var(--muted)", marginBottom: 12 }}>{r.loan.relationship || "Personal"} · Original: {fmtCurrency(r.originalAmount)}</div>
+                  <h4 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{loanDisplayTitle(r.loan)}</h4>
+                  <div style={{ fontSize: 14, color: "var(--muted)", marginBottom: 12 }}>
+                    {r.loan.direction === "taken" ? "I owe" : "They owe me"} · {r.loan.relationship || "Personal"} · Original: {fmtCurrency(r.originalAmount)}
+                  </div>
                   <div className="card-row" style={{ marginBottom: 12 }}>
-                    <div><span style={{ fontSize: 13, color: "var(--muted)" }}>Payments Received</span><div style={{ fontWeight: 700, color: "var(--success)" }}>{fmtCurrency(r.totalPayments)}</div></div>
+                    <div><span style={{ fontSize: 13, color: "var(--muted)" }}>{r.loan.direction === "taken" ? "Payments I Made" : "Payments Received"}</span><div style={{ fontWeight: 700, color: "var(--success)" }}>{fmtCurrency(r.totalPayments)}</div></div>
                     <div><span style={{ fontSize: 13, color: "var(--muted)" }}>Charges</span><div style={{ fontWeight: 700 }}>{fmtCurrency(r.totalCharges)}</div></div>
                     <div><span style={{ fontSize: 13, color: "var(--muted)" }}>Current Balance</span><div style={{ fontWeight: 700, color: r.currentBalance > 0 ? "var(--warning)" : "var(--success)" }}>{fmtCurrency(r.currentBalance)}</div></div>
                   </div>

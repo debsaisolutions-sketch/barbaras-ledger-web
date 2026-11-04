@@ -16,6 +16,29 @@ import {
 
 export type PropertyStatus = "Active" | "Vacant" | "Past Due" | "Closed" | "Sold";
 export type LoanStatus = "Active" | "Paid Off" | "Past Due" | "Written Off";
+/** given = I lent money (they owe me); taken = I borrowed (I owe them). */
+export type LoanDirection = "given" | "taken";
+
+export function normalizeLoanDirection(raw: unknown): LoanDirection {
+  if (raw === "given") return "given";
+  // Missing/null/unknown → taken (I owe). Matches Barbara's usual loans.
+  return "taken";
+}
+
+/** Display title: "Loan to Jane" or "Loan from Bank". */
+export function loanDisplayTitle(loan: Pick<Loan, "direction" | "borrowerName">): string {
+  const name = loan.borrowerName.trim() || "Unknown";
+  return loan.direction === "taken" ? `Loan from ${name}` : `Loan to ${name}`;
+}
+
+/** Other-party role label on forms/detail. */
+export function loanPartyLabel(direction: LoanDirection): string {
+  return direction === "taken" ? "Lender" : "Borrower";
+}
+
+export function loanBalanceOwedLabel(direction: LoanDirection): string {
+  return direction === "taken" ? "I owe" : "owed";
+}
 
 export const PAYMENT_METHOD_OPTIONS = [
   "Cash",
@@ -156,6 +179,7 @@ export interface PropertyTransaction {
 
 export interface Loan {
   id: string;
+  /** Other party name: borrower when given, lender when taken. */
   borrowerName: string;
   borrowerPhone: string;
   borrowerEmail: string;
@@ -166,6 +190,7 @@ export interface Loan {
   paymentDueDate: string;
   expectedMonthlyPayment: number;
   status: LoanStatus;
+  direction: LoanDirection;
   notes: string;
   nextReminderDate: string;
   reminderNote: string;
@@ -412,6 +437,7 @@ function mapLoan(row: Record<string, unknown>): Loan {
     paymentDueDate: String(row.payment_due_date ?? ""),
     expectedMonthlyPayment: num(row.expected_monthly_payment),
     status: row.status as LoanStatus,
+    direction: normalizeLoanDirection(row.direction),
     notes: String(row.notes ?? ""),
     nextReminderDate: dateStr(row.next_reminder_date),
     reminderNote: String(row.reminder_note ?? ""),
@@ -596,7 +622,7 @@ export type ReminderListItem = {
 export async function getUpcomingReminders(): Promise<ReminderListItem[]> {
   const [properties, loans, reminders] = await Promise.all([getProperties(), getLoans(), getReminders()]);
   const propertyName = new Map(properties.map((p) => [p.id, p.propertyName]));
-  const loanName = new Map(loans.map((l) => [l.id, `Loan to ${l.borrowerName}`]));
+  const loanName = new Map(loans.map((l) => [l.id, loanDisplayTitle(l)]));
   const items: ReminderListItem[] = [];
   for (const p of properties) {
     const d = p.nextReminderDate?.trim();
@@ -622,7 +648,7 @@ export async function getUpcomingReminders(): Promise<ReminderListItem[]> {
         note: l.reminderNote.trim(),
         entityType: "loan",
         entityId: l.id,
-        entityLabel: `Loan to ${l.borrowerName}`,
+        entityLabel: loanDisplayTitle(l),
       });
     }
   }
@@ -1119,6 +1145,7 @@ export async function addLoan(data: Omit<Loan, "id" | "createdAt" | "updatedAt">
     payment_due_date: data.paymentDueDate,
     expected_monthly_payment: data.expectedMonthlyPayment,
     status: data.status,
+    direction: normalizeLoanDirection(data.direction),
     notes: data.notes,
     next_reminder_date: data.nextReminderDate || null,
     reminder_note: data.reminderNote ?? "",
@@ -1162,6 +1189,7 @@ export async function updateLoan(id: string, data: Partial<Loan>): Promise<void>
   if (data.expectedMonthlyPayment !== undefined)
     patch.expected_monthly_payment = data.expectedMonthlyPayment;
   if (data.status !== undefined) patch.status = data.status;
+  if (data.direction !== undefined) patch.direction = normalizeLoanDirection(data.direction);
   if (data.notes !== undefined) patch.notes = data.notes;
   if (data.nextReminderDate !== undefined) patch.next_reminder_date = data.nextReminderDate || null;
   if (data.reminderNote !== undefined) patch.reminder_note = data.reminderNote;
@@ -1285,7 +1313,7 @@ export async function addLoanTransaction(
       type: actType,
       entityType: "loan",
       entityId: data.loanId,
-      entityName: `Loan to ${loan.borrowerName}`,
+      entityName: loanDisplayTitle(loan),
       personName: loan.borrowerName,
       amount: data.type === "payment" ? data.paymentAmount : data.chargeAmount,
       description: data.description || data.type,
@@ -1386,7 +1414,7 @@ export async function addNote(
   } else if (data.relatedType === "loan" || data.loanId) {
     const l = await getLoan(data.loanId || data.relatedId);
     if (l) {
-      entityName = `Loan to ${l.borrowerName}`;
+      entityName = loanDisplayTitle(l);
       personName = l.borrowerName;
     }
   } else entityName = "General Note";
@@ -1590,7 +1618,7 @@ export async function addDocument(
     } else if (data.relatedType === "loan" && data.relatedId) {
       const l = await getLoan(data.relatedId);
       if (l) {
-        entityName = `Loan to ${l.borrowerName}`;
+        entityName = loanDisplayTitle(l);
         personName = l.borrowerName;
       }
     }
@@ -1743,7 +1771,7 @@ export async function searchAll(query: string) {
   );
   const [propTxns, loanTxns] = await Promise.all([getAllPropertyTransactions(), getAllLoanTransactions()]);
   const propertyNameById = new Map(allProperties.map((p) => [p.id, p.propertyName]));
-  const loanNameById = new Map(allLoans.map((l) => [l.id, `Loan to ${l.borrowerName}`]));
+  const loanNameById = new Map(allLoans.map((l) => [l.id, loanDisplayTitle(l)]));
   const propPaymentHits = propTxns
     .filter((t) =>
       [t.description, t.checkNumber, t.referenceNumber].some((f) => f?.toLowerCase().includes(q))
@@ -1803,9 +1831,16 @@ export async function getDashboardStats(year?: number) {
   const totalRentalIncome = yearPropTxns
     .filter((t) => t.type === "payment")
     .reduce((s, t) => s + t.paymentAmount, 0);
+  const loanById = new Map(loans.map((l) => [l.id, l]));
+  // Received on loans I gave (+) minus payments I made on loans I owe (−).
   const totalLoanPayments = yearLoanTxns
     .filter((t) => t.type === "payment")
-    .reduce((s, t) => s + t.paymentAmount, 0);
+    .reduce((s, t) => {
+      const loan = loanById.get(t.loanId);
+      const amount = t.paymentAmount;
+      if (loan?.direction === "taken") return s - amount;
+      return s + amount;
+    }, 0);
   const totalLateFees = yearPropTxns
     .filter((t) => t.type === "late_fee")
     .reduce((s, t) => s + t.chargeAmount, 0);
@@ -1826,9 +1861,11 @@ export async function getDashboardStats(year?: number) {
       today,
     });
   }
+  // They owe me (+) ; I owe them (−).
   let openLoanBalances = 0;
   for (const l of loans.filter((l) => l.status === "Active" || l.status === "Past Due")) {
-    openLoanBalances += calculateLoanBalance(loanTxns.filter((t) => t.loanId === l.id));
+    const bal = calculateLoanBalance(loanTxns.filter((t) => t.loanId === l.id));
+    openLoanBalances += l.direction === "taken" ? -bal : bal;
   }
   return { totalRentalIncome, totalLoanPayments, totalLateFees, unpaidRent, openLoanBalances };
 }

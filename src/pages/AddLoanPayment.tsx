@@ -4,6 +4,7 @@ import {
   getLoans,
   addLoanTransaction,
   addDocumentWithFile,
+  loanDisplayTitle,
   PAYMENT_METHOD_OPTIONS,
   type Loan,
   type PaymentMethod,
@@ -26,6 +27,8 @@ export default function AddLoanPayment() {
   });
   const [attachment, setAttachment] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const selectedLoan = loans.find((l) => l.id === form.loanId) || null;
+  const isTaken = selectedLoan?.direction === "taken";
 
   useEffect(() => {
     let cancelled = false;
@@ -61,11 +64,16 @@ export default function AddLoanPayment() {
     }
     try {
       setSaving(true);
+      const selected = loans.find((l) => l.id === form.loanId);
+      const paymentLabel =
+        selected?.direction === "taken"
+          ? `Payment I made (${form.method})`
+          : `Payment received (${form.method})`;
       const txn = await addLoanTransaction({
         loanId: form.loanId,
         date: form.date,
         type: "payment",
-        description: `Payment received (${form.method})`,
+        description: paymentLabel,
         chargeAmount: 0,
         paymentAmount: parseFloat(form.amount),
         paymentMethod: form.method,
@@ -100,7 +108,7 @@ export default function AddLoanPayment() {
         ← Back
       </button>
       <div className="page-header">
-        <h2>💰 Record Loan Payment</h2>
+        <h2>{isTaken ? "💰 Record Payment I Made" : "💰 Record Loan Payment"}</h2>
       </div>
       <div className="card">
         <form onSubmit={handleSubmit}>
@@ -111,11 +119,18 @@ export default function AddLoanPayment() {
                 <option value="">Select a loan...</option>
                 {loans.map((l) => (
                   <option key={l.id} value={l.id}>
-                    Loan to {l.borrowerName}
+                    {loanDisplayTitle(l)}
                   </option>
                 ))}
               </select>
             </div>
+          )}
+          {selectedLoan && (
+            <p style={{ color: "var(--muted)", marginBottom: 16 }}>
+              {selectedLoan.direction === "taken"
+                ? "This records money you paid toward a loan you owe."
+                : "This records money you received on a loan you gave."}
+            </p>
           )}
           <div className="form-row">
             <div className="form-group">

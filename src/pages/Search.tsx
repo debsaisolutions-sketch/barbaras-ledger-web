@@ -123,8 +123,10 @@ export default function SearchPage() {
               results.loans.map((l) => (
                 <div key={l.id} className="list-item" style={{ cursor: "default" }}>
                   <div className="item-content">
-                    <div className="item-title">Loan to {l.borrowerName}</div>
-                    <div className="item-subtitle">{l.relationship || "Personal loan"}</div>
+                    <div className="item-title">{l.direction === "taken" ? `Loan from ${l.borrowerName}` : `Loan to ${l.borrowerName}`}</div>
+                    <div className="item-subtitle">
+                      {l.direction === "taken" ? "I owe" : "They owe me"} · {l.relationship || "Personal loan"}
+                    </div>
                   </div>
                   <button className="btn btn-outline btn-sm" onClick={() => navigate(`/loans/${l.id}`)}>
                     Open Loan

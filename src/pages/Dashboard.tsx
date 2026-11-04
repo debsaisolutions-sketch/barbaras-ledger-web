@@ -136,7 +136,22 @@ export default function Dashboard() {
         </div>
         <div className="card">
           <div className="stat-label">Loan Payments (YTD)</div>
-          <div className="stat-value green">{fmtCurrency(stats.totalLoanPayments)}</div>
+          <div
+            className="stat-value"
+            style={{
+              color:
+                stats.totalLoanPayments > 0
+                  ? "var(--success)"
+                  : stats.totalLoanPayments < 0
+                    ? "var(--error)"
+                    : undefined,
+            }}
+          >
+            {fmtCurrency(stats.totalLoanPayments)}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+            + received · − payments you made
+          </div>
         </div>
         <div className="card">
           <div className="stat-label">Unpaid Rent</div>
@@ -144,7 +159,22 @@ export default function Dashboard() {
         </div>
         <div className="card">
           <div className="stat-label">Open Loan Balances</div>
-          <div className="stat-value orange">{fmtCurrency(stats.openLoanBalances)}</div>
+          <div
+            className="stat-value"
+            style={{
+              color:
+                stats.openLoanBalances > 0
+                  ? "var(--warning)"
+                  : stats.openLoanBalances < 0
+                    ? "var(--error)"
+                    : undefined,
+            }}
+          >
+            {fmtCurrency(stats.openLoanBalances)}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+            + they owe you · − you owe
+          </div>
         </div>
       </div>
 

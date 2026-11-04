@@ -1,15 +1,26 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { getLoan, addLoan, updateLoan, type LoanStatus } from "../store";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  getLoan,
+  addLoan,
+  updateLoan,
+  loanPartyLabel,
+  normalizeLoanDirection,
+  type LoanDirection,
+  type LoanStatus,
+} from "../store";
 import { useRefresh } from "../App";
 
 export default function LoanForm() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { refresh } = useRefresh();
   const isEdit = !!id;
+  const initialDirection = normalizeLoanDirection(searchParams.get("direction") || "taken");
 
   const [form, setForm] = useState({
+    direction: initialDirection as LoanDirection,
     borrowerName: "",
     borrowerPhone: "",
     borrowerEmail: "",
@@ -37,6 +48,7 @@ export default function LoanForm() {
         const l = await getLoan(id);
         if (cancelled || !l) return;
         setForm({
+          direction: l.direction,
           borrowerName: l.borrowerName,
           borrowerPhone: l.borrowerPhone,
           borrowerEmail: l.borrowerEmail,
@@ -64,11 +76,12 @@ export default function LoanForm() {
   }, [id]);
 
   const set = (f: string, v: string) => setForm((prev) => ({ ...prev, [f]: v }));
+  const partyLabel = loanPartyLabel(form.direction);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.borrowerName.trim()) {
-      alert("Borrower name is required.");
+      alert(`${partyLabel} name is required.`);
       return;
     }
     const reminderDate = form.nextReminderDate;
@@ -77,6 +90,7 @@ export default function LoanForm() {
       isEdit &&
       (reminderDate !== initialReminder.date || reminderNote !== initialReminder.note.trim());
     const data = {
+      direction: form.direction,
       borrowerName: form.borrowerName.trim(),
       borrowerPhone: form.borrowerPhone.trim(),
       borrowerEmail: form.borrowerEmail.trim(),
@@ -132,8 +146,26 @@ export default function LoanForm() {
       <div className="card">
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label>Borrower Name *</label>
-            <input value={form.borrowerName} onChange={(e) => set("borrowerName", e.target.value)} />
+            <label>What kind of loan is this? *</label>
+            <select
+              value={form.direction}
+              onChange={(e) => set("direction", e.target.value)}
+            >
+              <option value="taken">I borrowed this — I need to pay it back</option>
+              <option value="given">I lent this — they pay me back</option>
+            </select>
+            <p style={{ color: "var(--muted)", fontSize: 14, marginTop: 8, marginBottom: 0 }}>
+              Choose “I borrowed” for loans you pay. Choose “I lent” only when someone else pays you
+              back. You can change this later if a loan was saved the wrong way.
+            </p>
+          </div>
+          <div className="form-group">
+            <label>{partyLabel} Name *</label>
+            <input
+              value={form.borrowerName}
+              onChange={(e) => set("borrowerName", e.target.value)}
+              placeholder={form.direction === "taken" ? "Bank, person, or company you owe" : "Person who owes you"}
+            />
           </div>
           <div className="form-row">
             <div className="form-group">
@@ -151,7 +183,7 @@ export default function LoanForm() {
               <input
                 value={form.relationship}
                 onChange={(e) => set("relationship", e.target.value)}
-                placeholder="e.g., Friend, Family"
+                placeholder="e.g., Bank, Friend, Family"
               />
             </div>
             <div className="form-group">
@@ -223,7 +255,7 @@ export default function LoanForm() {
           </div>
           <p style={{ color: "var(--muted)", fontSize: 14, marginTop: -8, marginBottom: 16 }}>
             Use reminders for things you need to check or follow up on, like checking your bank
-            account for a direct deposit.
+            account for a payment.
           </p>
           <div className="form-group">
             <label>Notes</label>

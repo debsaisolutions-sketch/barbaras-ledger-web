@@ -18,6 +18,8 @@ import {
   getReminders,
   voidLoanTransaction,
   deleteLoanTransaction,
+  loanDisplayTitle,
+  loanPartyLabel,
   type Reminder,
   type Loan,
   type LoanTransaction,
@@ -112,7 +114,7 @@ export default function LoanDetail() {
 
   const handleArchive = async () => {
     if (!loan) return;
-    if (window.confirm(`Write off loan to "${loan.borrowerName}"?`)) {
+    if (window.confirm(`Write off ${loanDisplayTitle(loan)}?`)) {
       try {
         await archiveLoan(loan.id);
         refresh();
@@ -191,7 +193,7 @@ export default function LoanDetail() {
 
   const confirmDeleteLoan = async () => {
     if (!loan) return;
-    if (!window.confirm(`Permanently delete "${loan.borrowerName}" and its records? This is for test entries you do not need to keep.`)) {
+    if (!window.confirm(`Permanently delete ${loanDisplayTitle(loan)} and its records? This is for test entries you do not need to keep.`)) {
       return;
     }
     try {
@@ -270,8 +272,11 @@ export default function LoanDetail() {
           }}
         >
           <div>
-            <h2>Loan to {loan.borrowerName}</h2>
-            <div className="detail-subtitle">{loan.relationship || "Personal Loan"}</div>
+            <h2>{loanDisplayTitle(loan)}</h2>
+            <div className="detail-subtitle">
+              {loan.direction === "taken" ? "I owe this" : "They owe me"} ·{" "}
+              {loan.relationship || "Personal Loan"}
+            </div>
           </div>
           <span className={`badge ${statusBadge(loan.status)}`}>{loan.status}</span>
         </div>
@@ -321,7 +326,7 @@ export default function LoanDetail() {
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>
         <button className="btn btn-primary" onClick={() => navigate(`/loans/${id}/payment`)}>
-          💰 Record Payment
+          {loan.direction === "taken" ? "💰 Record Payment I Made" : "💰 Record Payment Received"}
         </button>
         <button className="btn btn-secondary" onClick={() => navigate(`/loans/${id}/charge`)}>
           📋 Add Charge
@@ -689,7 +694,7 @@ export default function LoanDetail() {
         <p style={{ color: "var(--muted)", marginBottom: 8 }}>{ledgerTitle}</p>
         <p style={{ color: "var(--muted)", marginBottom: 14 }}>Printed: {fmtDate(new Date().toISOString())}</p>
         <div className="detail-info-grid">
-          <div className="detail-info-item"><label>Borrower</label><p>{loan.borrowerName}</p></div>
+          <div className="detail-info-item"><label>{loanPartyLabel(loan.direction)}</label><p>{loan.borrowerName}</p></div>
           <div className="detail-info-item"><label>Phone</label><p>{loan.borrowerPhone || "—"}</p></div>
           <div className="detail-info-item"><label>Email</label><p>{loan.borrowerEmail || "—"}</p></div>
           <div className="detail-info-item"><label>Original amount</label><p>{fmtCurrency(loan.originalAmount)}</p></div>

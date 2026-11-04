@@ -1,5 +1,6 @@
 export function fmtCurrency(n: number): string {
-  return "$" + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const abs = Math.abs(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return n < 0 ? `-$${abs}` : `$${abs}`;
 }
 export function fmtDate(s: string): string {
   if (!s) return "";
